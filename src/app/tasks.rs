@@ -1,0 +1,366 @@
+use super::*;
+
+// ── Tasks ─────────────────────────────────────────────────────────────────────
+
+impl EasyHarvest {
+    pub(super) fn load_entries_task(&self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let date = self.current_date.format("%Y-%m-%d").to_string();
+        let gen = self.entries_gen;
+        Task::perform(
+            async move {
+                client
+                    .list_all_time_entries(&date, &date)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            move |result| Message::EntriesLoaded(gen, result),
+        )
+    }
+
+    pub(super) fn load_assignments_task(&self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let data_dir = self.settings.data_dir.clone();
+        Task::perform(
+            async move {
+                // Try cache first (24-hour TTL)
+                if let Some(cache) = ProjectCache::load(&data_dir) {
+                    if cache.is_valid() {
+                        return Ok(cache.assignments);
+                    }
+                }
+                let assignments = client
+                    .list_all_my_project_assignments()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                // Best-effort cache write
+                let _ = ProjectCache::new(assignments.clone()).save(&data_dir);
+                Ok(assignments)
+            },
+            Message::AssignmentsLoaded,
+        )
+    }
+
+    pub(super) fn load_stats_task(&self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let today = Local::now().naive_local().date();
+        let year = self.overtime_year;
+        let from = format!("{year}-01-01");
+        let to = format!("{year}-12-31");
+        // For past years use Dec 31 as the balance end date so all year entries count.
+        let balance_end = if year < today.year() {
+            chrono::NaiveDate::from_ymd_opt(year, 12, 31).unwrap_or(today)
+        } else {
+            today
+        };
+        let balance_end_str = balance_end.format("%Y-%m-%d").to_string();
+        let expected_per_day = self.settings.expected_hours_per_day();
+        let public_holidays = swiss_public_holidays(year);
+        let carryover = self.settings.overtime_carryover_for(year);
+        let holiday_task_ids = self.settings.holiday_task_ids.clone();
+        let total_holiday_days = self.settings.effective_holiday_days_for(year);
+        let first_work_day = self.settings.first_work_day;
+        let gen = self.stats_gen;
+
+        Task::perform(
+            async move {
+                let all_entries = client
+                    .list_all_time_entries(&from, &to)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                // Balance only counts entries up to balance_end (today for current year,
+                // Dec 31 for past years); holiday stats need the full year.
+                let ytd_entries: Vec<_> = all_entries
+                    .iter()
+                    .filter(|e| e.spent_date.as_str() <= balance_end_str.as_str())
+                    .cloned()
+                    .collect();
+
+                // Use first_work_day as effective start when it falls in the target year so
+                // expected hours are not inflated by months the user wasn't employed yet.
+                let effective_start = first_work_day.filter(|d| d.year() == year);
+                let balance = year_to_date_balance(
+                    &ytd_entries,
+                    year,
+                    effective_start,
+                    expected_per_day,
+                    &public_holidays,
+                    carryover,
+                    balance_end,
+                );
+                let holidays = crate::stats::holiday_stats(
+                    &all_entries,
+                    year,
+                    &holiday_task_ids,
+                    total_holiday_days,
+                    expected_per_day,
+                );
+                Ok((balance, holidays))
+            },
+            move |result| Message::StatsLoaded(gen, result),
+        )
+    }
+
+    pub(super) fn load_vacation_task(&self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let year = self.vacation.year;
+        let from = format!("{year}-01-01");
+        let to = format!("{year}-12-31");
+        let gen = self.vacation_gen;
+        Task::perform(
+            async move {
+                client
+                    .list_all_time_entries(&from, &to)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            move |result| Message::VacationEntriesLoaded(gen, result),
+        )
+    }
+
+    pub(super) fn load_billable_task(&self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let year = self.billable.year;
+        let (from, to) = match self.billable.month {
+            None => (format!("{year}-01-01"), format!("{year}-12-31")),
+            Some(m) => {
+                let first = NaiveDate::from_ymd_opt(year, m, 1).expect("valid month 1-12");
+                let last = if m == 12 {
+                    NaiveDate::from_ymd_opt(year + 1, 1, 1).expect("next year valid")
+                } else {
+                    NaiveDate::from_ymd_opt(year, m + 1, 1).expect("valid month+1")
+                }
+                .pred_opt()
+                .expect("1st of month always has a predecessor");
+                (first.format("%Y-%m-%d").to_string(), last.format("%Y-%m-%d").to_string())
+            }
+        };
+        let gen = self.billable_gen;
+        Task::perform(
+            async move {
+                client
+                    .list_all_time_entries(&from, &to)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            move |result| Message::BillableEntriesLoaded(gen, result),
+        )
+    }
+
+    pub(super) fn submit_vacation_task(
+        &self,
+        entries: Vec<crate::harvest::models::CreateTimeEntry>,
+    ) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                let mut created = Vec::new();
+                for entry in entries {
+                    match client.create_time_entry(&entry).await {
+                        Ok(e) => created.push(e),
+                        Err(e) => return Err(e.to_string()),
+                    }
+                }
+                Ok(created)
+            },
+            Message::VacationEntriesCreated,
+        )
+    }
+
+    /// Reload the work day store if `current_date` has crossed into a new month.
+    pub(super) fn maybe_reload_work_day_store(&mut self) {
+        let y = self.current_date.year();
+        let m = self.current_date.month();
+        if self.work_day_store.year != y || self.work_day_store.month != m {
+            self.work_day_store = WorkDayStore::load(&self.settings.data_dir, y, m);
+        }
+    }
+
+    /// Update the tray's phase so the context menu shows the correct actions.
+    #[cfg(target_os = "linux")]
+    pub(super) fn sync_tray_phase(&self) {
+        let today = Local::now().naive_local().date();
+        let day = self.work_day_store.get_or_default(today);
+        if let Ok(mut lock) = self.tray_phase.lock() {
+            *lock = day.phase();
+        }
+        self.tray_update_notify.notify_one();
+    }
+
+    pub(super) fn recompute_billable_summary(&mut self) {
+        let entries = &self.billable.entries;
+        let total_hours: f64 = entries.iter().map(|e| e.hours).sum();
+        let billable_hours: f64 = entries.iter().filter(|e| e.billable).map(|e| e.hours).sum();
+        let non_billable_hours = total_hours - billable_hours;
+        let billable_pct = if total_hours > 0.0 { billable_hours / total_hours } else { 0.0 };
+
+        // Group by project
+        use std::collections::HashMap;
+        let mut map: HashMap<i64, (&str, &str, f64, f64)> = HashMap::new();
+        for e in entries {
+            let rec = map.entry(e.project.id).or_insert((&e.project.name, &e.client.name, 0.0, 0.0));
+            rec.3 += e.hours;
+            if e.billable { rec.2 += e.hours; }
+        }
+        let mut projects: Vec<(String, String, f64, f64)> = map
+            .into_values()
+            .map(|(name, client, b, t)| (name.to_owned(), client.to_owned(), b, t))
+            .collect();
+        projects.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+        self.billable.summary = Some(BillableSummary {
+            total_hours, billable_hours, non_billable_hours, billable_pct, projects,
+        });
+    }
+
+    pub(super) fn recompute_vacation_summary(&mut self) {
+        let expected_per_day = self.settings.expected_hours_per_day();
+        let task_ids = &self.settings.holiday_task_ids;
+        let today = chrono::Local::now().naive_local().date();
+        let year = self.vacation.year;
+
+        let entries = &self.vacation.entries;
+        let used_days: f64 = entries
+            .iter()
+            .filter(|e| task_ids.contains(&e.task.id))
+            .filter(|e| {
+                NaiveDate::parse_from_str(&e.spent_date, "%Y-%m-%d")
+                    .map(|d| d <= today)
+                    .unwrap_or(false)
+            })
+            .map(|e| e.hours / expected_per_day)
+            .sum();
+        let booked_days: f64 = entries
+            .iter()
+            .filter(|e| task_ids.contains(&e.task.id))
+            .filter(|e| {
+                NaiveDate::parse_from_str(&e.spent_date, "%Y-%m-%d")
+                    .map(|d| d > today)
+                    .unwrap_or(false)
+            })
+            .map(|e| e.hours / expected_per_day)
+            .sum();
+
+        let total_days = self.settings.effective_holiday_days_for(year);
+        let days_remaining = total_days - used_days - booked_days;
+        let carryover_days = self
+            .settings
+            .carryover
+            .get(&year)
+            .map(|c| c.holiday_days)
+            .unwrap_or(0.0);
+
+        self.vacation.summary = Some(VacationSummary {
+            used_days, booked_days, days_remaining, total_days, carryover_days,
+        });
+    }
+
+    pub(super) fn recompute_project_options(&mut self) {
+        self.cached_project_options = self.favorites.sorted_options(&self.assignments);
+    }
+
+    pub(super) fn recompute_expected_hours(&mut self) {
+        let d = self.current_date;
+        let wd = d.weekday().num_days_from_monday();
+        if wd >= 5 {
+            self.cached_expected_hours = 0.0;
+            return;
+        }
+        let epd = self.settings.expected_hours_per_day();
+        for h in &crate::state::settings::swiss_public_holidays(d.year()) {
+            if h.date == d {
+                self.cached_expected_hours = epd - h.credit_hours(epd);
+                return;
+            }
+        }
+        self.cached_expected_hours = epd;
+    }
+
+    pub(super) fn recompute_task_list(&mut self) {
+        let mut tasks: Vec<(i64, String, String)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for pa in self.assignments.iter().filter(|p| p.is_active) {
+            for ta in pa.task_assignments.iter().filter(|t| t.is_active) {
+                if seen.insert(ta.task.id) {
+                    tasks.push((
+                        ta.task.id,
+                        ta.task.name.clone(),
+                        format!("{} — {}", pa.client.name, pa.project.name),
+                    ));
+                }
+            }
+        }
+        tasks.sort_by(|a, b| a.1.cmp(&b.1));
+        self.settings_form.cached_task_list = tasks;
+    }
+}
+
+// ── Vacation entry builder (pure, testable) ─────────────────────────────────
+
+pub(super) fn build_vacation_entries(
+    from: NaiveDate,
+    to: NaiveDate,
+    vacation_year: i32,
+    hours: f64,
+    project_id: i64,
+    task_id: i64,
+) -> Result<Vec<crate::harvest::models::CreateTimeEntry>, String> {
+    use chrono::Weekday;
+
+    if from.year() != vacation_year || to.year() != vacation_year {
+        return Err(format!("Dates must be in the year {vacation_year}."));
+    }
+    if from > to {
+        return Err("From date must be before or equal to To date.".into());
+    }
+
+    let holidays = swiss_public_holidays(from.year());
+    let mut entries = Vec::new();
+    let mut d = from;
+    while d <= to {
+        let is_weekend = matches!(d.weekday(), Weekday::Sat | Weekday::Sun);
+        let is_holiday = holidays.iter().any(|h| h.date == d);
+        if !is_weekend && !is_holiday {
+            entries.push(crate::harvest::models::CreateTimeEntry {
+                project_id,
+                task_id,
+                spent_date: d.format("%Y-%m-%d").to_string(),
+                hours,
+                notes: None,
+            });
+        }
+        d += chrono::Duration::days(1);
+    }
+    if entries.is_empty() {
+        return Err("No workdays in selected range (weekends and holidays excluded).".into());
+    }
+    Ok(entries)
+}
+
+pub(super) fn format_harvest_error(e: HarvestError) -> String {
+    match e {
+        HarvestError::Api { status, body } => {
+            format!("API error {status}: {body}")
+        }
+        HarvestError::Http(e) => format!("Network error: {e}"),
+        HarvestError::RateLimited { retry_after_secs } => {
+            format!("Rate limited — retry after {retry_after_secs}s")
+        }
+        HarvestError::Unauthorized => {
+            "Authentication failed. Please check your API token and Account ID.".into()
+        }
+    }
+}

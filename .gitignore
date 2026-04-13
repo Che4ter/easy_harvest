@@ -1,0 +1,8 @@
+/target
+/export
+/.vscode
+/.claude
+
+# Credentials — never commit these
+api.txt
+*.token

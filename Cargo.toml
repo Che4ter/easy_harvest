@@ -1,0 +1,60 @@
+[package]
+name = "easy_harvest"
+version = "0.9.0"
+edition = "2021"
+
+[lib]
+name = "easy_harvest"
+path = "src/lib.rs"
+
+[[bin]]
+name = "easy_harvest"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime + HTTP
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls-webpki-roots"], default-features = false }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Date/Time
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+
+# Credentials — no features here; platform stores are enabled below
+keyring = "3"
+
+# Directories
+dirs = "6"
+
+# UI
+iced = { version = "0.13", features = ["tokio", "image"] }
+
+# Native file/folder picker dialogs
+rfd = "0.15"
+
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = "0.3"
+keyring = { version = "3", features = ["sync-secret-service"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[build-dependencies]
+image = { version = "0.24", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
