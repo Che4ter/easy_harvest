@@ -42,6 +42,28 @@ Build and run:
 cargo run --release
 ```
 
+### Cross-compiling for Windows (from Linux)
+
+Install the target and MinGW toolchain once:
+
+```sh
+rustup target add x86_64-pc-windows-gnu
+
+# Fedora / RHEL
+sudo dnf install mingw64-gcc
+
+# Ubuntu / Debian
+sudo apt install gcc-mingw-w64-x86-64
+```
+
+Then build:
+
+```sh
+cargo build --release --target x86_64-pc-windows-gnu
+```
+
+The binary is produced at `target/x86_64-pc-windows-gnu/release/easy_harvest.exe`.
+
 The first run shows a wizard to set the data folder and connect to Harvest (Personal Access Token + Account ID from harvestapp.com → Settings → Developers).
 
 ## Data
