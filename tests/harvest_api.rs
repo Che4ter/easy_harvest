@@ -264,7 +264,7 @@ async fn test_stats_holiday_year() {
     );
 
     // Year-to-date balance with zero carryover
-    let ytd = stats::year_to_date_balance(&entries, year, None, 8.0, &[], 0.0, today);
+    let ytd = stats::year_to_date_balance(&entries, year, None, 8.0, &[], 0.0, 0.0, today);
     println!("\nYear-to-date balance:");
     println!("  Total hours:    {:.2}h", ytd.period.total_hours);
     println!("  Expected hours: {:.2}h", ytd.period.expected_hours);

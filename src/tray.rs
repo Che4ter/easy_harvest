@@ -4,7 +4,7 @@ use iced::Subscription;
 use iced::advanced::subscription::{self, EventStream};
 use tokio::sync::Notify;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIconBuilder};
+use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
 
 use crate::state::work_day::WorkPhase;
 
@@ -162,8 +162,9 @@ fn spawn_tray_thread(
 
             let _ = ready_tx.send(Ok(()));
 
-            // Event loop: poll menu events and incoming commands.
+            // Event loop: poll menu events, icon clicks, and incoming commands.
             let menu_rx = MenuEvent::receiver();
+            let icon_rx = TrayIconEvent::receiver();
             loop {
                 // Check for menu clicks (non-blocking).
                 while let Ok(event) = menu_rx.try_recv() {
@@ -171,6 +172,20 @@ fn spawn_tray_thread(
                         if action_tx.send(action).is_err() {
                             return; // subscription dropped
                         }
+                    }
+                }
+
+                // Check for tray icon clicks — left-click toggles the window.
+                // Do NOT match DoubleClick: on Windows a double-click fires
+                // both Click and DoubleClick, causing ToggleWindow twice
+                // (open then immediately close).
+                while let Ok(event) = icon_rx.try_recv() {
+                    if matches!(
+                        &event,
+                        TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. }
+                    ) && action_tx.send(TrayAction::ToggleWindow).is_err()
+                    {
+                        return;
                     }
                 }
 

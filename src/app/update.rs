@@ -51,6 +51,9 @@ impl EasyHarvest {
             // ── Billable ──
             Message::Billable(msg) => self.update_billable(msg),
 
+            // ── Project Tracking ──
+            Message::ProjectTracking(msg) => self.update_project_tracking(msg),
+
             // ── Stats ──
             Message::Stats(msg) => self.update_stats(msg),
 
@@ -74,7 +77,16 @@ impl EasyHarvest {
 
             Message::TrayUnavailable => {
                 self.tray_available = false;
-                Task::none()
+                // The window may have already been closed under the assumption that
+                // the tray was working.  Re-open it so the app remains reachable.
+                if self.window_id.is_none() {
+                    let (new_id, open_task) = window::open(window_settings());
+                    self.window_id = Some(new_id);
+                    self.window_visible = true;
+                    open_task.map(|id| Message::WindowIdReceived(Some(id)))
+                } else {
+                    Task::none()
+                }
             }
 
             Message::QuitApp => iced::exit(),
@@ -162,6 +174,19 @@ impl EasyHarvest {
                             Task::none()
                         }
                     }
+                    Page::ProjectTracking => {
+                        let year = self.project_tracking.year;
+                        if self.project_tracking.entries.is_empty()
+                            && self.client.is_some()
+                            && !self.project_tracking.budgets.budgets_for(year).is_empty()
+                        {
+                            self.loading = true;
+                            self.project_tracking_gen += 1;
+                            self.load_project_tracking_task()
+                        } else {
+                            Task::none()
+                        }
+                    }
                 };
                 self.page = page;
                 task
@@ -173,6 +198,7 @@ impl EasyHarvest {
                 self.recompute_expected_hours();
                 self.entries.clear();
                 self.entry_form = None;
+                self.work_day_edit = WorkDayEditState::default();
                 self.loading = true;
                 self.entries_gen += 1;
                 self.load_entries_task()
@@ -184,6 +210,7 @@ impl EasyHarvest {
                 self.recompute_expected_hours();
                 self.entries.clear();
                 self.entry_form = None;
+                self.work_day_edit = WorkDayEditState::default();
                 self.loading = true;
                 self.entries_gen += 1;
                 self.load_entries_task()
@@ -195,6 +222,7 @@ impl EasyHarvest {
                 self.recompute_expected_hours();
                 self.entries.clear();
                 self.entry_form = None;
+                self.work_day_edit = WorkDayEditState::default();
                 self.loading = true;
                 self.entries_gen += 1;
                 self.load_entries_task()
@@ -233,6 +261,7 @@ impl EasyHarvest {
                 self.recompute_expected_hours();
                 self.entries.clear();
                 self.entry_form = None;
+                self.work_day_edit = WorkDayEditState::default();
                 self.loading = true;
                 self.entries_gen += 1;
                 self.load_entries_task()

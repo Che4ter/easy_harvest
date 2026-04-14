@@ -12,6 +12,7 @@ impl EasyHarvest {
             Page::Stats => stats_view::view(self),
             Page::Vacation => vacation_view::view(self),
             Page::Billable => billable_view::view(self),
+            Page::ProjectTracking => project_tracking_view::view(self),
         };
 
         let nav = nav_bar(&self.page);
@@ -100,6 +101,7 @@ fn nav_bar(current: &Page) -> Element<'static, Message> {
             btn("Vacation", Page::Vacation, *current == Page::Vacation),
             btn("Overtime", Page::Stats, *current == Page::Stats),
             btn("Billable", Page::Billable, *current == Page::Billable),
+            btn("Projects", Page::ProjectTracking, *current == Page::ProjectTracking),
             Space::new().width(iced::Length::Fill),
             settings_btn,
         ]

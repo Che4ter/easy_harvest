@@ -196,15 +196,7 @@ fn hours_summary(state: &EasyHarvest) -> Element<'_, Message> {
     container(
         column![labels, track].spacing(6),
     )
-    .style(|_| container::Style {
-        background: Some(iced::Background::Color(SURFACE)),
-        border: iced::Border {
-            color: SURFACE_RAISED,
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    })
+    .style(super::strip_style)
     .padding([8, 12])
     .width(Length::Fill)
     .into()
@@ -365,11 +357,7 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
     container(
         column![status_row, edit_panel, bar].spacing(0),
     )
-    .style(|_| container::Style {
-        background: Some(iced::Background::Color(SURFACE)),
-        border: iced::Border { color: SURFACE_RAISED, width: 1.0, radius: 0.0.into() },
-        ..Default::default()
-    })
+    .style(super::strip_style)
     .padding([8, 12])
     .width(Length::Fill)
     .into()
@@ -487,7 +475,7 @@ fn wd_secondary_btn(label: &'static str, msg: Message) -> Element<'static, Messa
     button(text(label).font(FONT_MEDIUM).size(12).color(TEXT_PRIMARY))
         .style(|_, status| {
             let bg = match status {
-                button::Status::Hovered => Color { r: 0.200, g: 0.215, b: 0.270, a: 1.0 },
+                button::Status::Hovered => SURFACE_HOVER,
                 _                       => SURFACE_RAISED,
             };
             button::Style {
@@ -549,12 +537,7 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
                 text("Click + Add Entry to start tracking")
                     .font(FONT_REGULAR)
                     .size(12)
-                    .color(Color {
-                        r: TEXT_MUTED.r,
-                        g: TEXT_MUTED.g,
-                        b: TEXT_MUTED.b,
-                        a: 0.6,
-                    }),
+                    .color(super::with_alpha(TEXT_MUTED, 0.6)),
             ]
             .spacing(6)
             .align_x(Alignment::Center),
@@ -730,9 +713,7 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
                 button(text(label).font(FONT_MEDIUM).size(12).color(TEXT_PRIMARY))
                     .style(|_, status| button::Style {
                         background: Some(iced::Background::Color(match status {
-                            button::Status::Hovered => Color {
-                                r: ACCENT.r, g: ACCENT.g, b: ACCENT.b, a: 0.1,
-                            },
+                            button::Status::Hovered => with_alpha(ACCENT, 0.1),
                             _ => SURFACE_RAISED,
                         })),
                         text_color: TEXT_PRIMARY,

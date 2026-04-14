@@ -48,7 +48,9 @@ pub struct DailySummary {
 pub struct YearBalance {
     pub period: PeriodStats,
     pub carryover_hours: f64,
-    /// carryover + period.balance_hours.
+    /// Sum of manual overtime adjustments (positive = added, negative = deducted).
+    pub manual_adjustments_hours: f64,
+    /// carryover + period.balance_hours + manual_adjustments_hours.
     pub total_balance: f64,
 }
 
@@ -145,6 +147,7 @@ pub fn holiday_stats(
 ///
 /// `effective_start` overrides the Jan 1 lower bound — pass `Some(first_work_day)` when the
 /// employee did not work the full year so expected hours are prorated from their start date.
+#[allow(clippy::too_many_arguments)]
 pub fn year_to_date_balance(
     entries: &[TimeEntry],
     year: i32,
@@ -152,6 +155,7 @@ pub fn year_to_date_balance(
     expected_hours_per_day: f64,
     public_holidays: &[PublicHoliday],
     carryover_hours: f64,
+    manual_adjustments_hours: f64,
     as_of: NaiveDate,
 ) -> YearBalance {
     let (year_start, to) = year_bounds(year);
@@ -161,7 +165,8 @@ pub fn year_to_date_balance(
     let period = period_stats(entries, from, to, expected_hours_per_day, public_holidays, as_of);
     YearBalance {
         carryover_hours,
-        total_balance: carryover_hours + period.balance_hours,
+        manual_adjustments_hours,
+        total_balance: carryover_hours + period.balance_hours + manual_adjustments_hours,
         period,
     }
 }
@@ -527,7 +532,7 @@ mod tests {
         ];
         // as_of = Jan 10 → Jan 1 (Wed) + Jan 2 (Thu) + Jan 3 (Fri) + Jan 6-10 = 8 working days
         let as_of = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
-        let ytd = year_to_date_balance(&entries, 2025, None, 8.0, &[], 5.5, as_of);
+        let ytd = year_to_date_balance(&entries, 2025, None, 8.0, &[], 5.5, 0.0, as_of);
 
         assert_eq!(ytd.period.total_hours, 40.0);
         assert_eq!(ytd.period.expected_hours, 64.0); // 8 days × 8h
@@ -546,7 +551,7 @@ mod tests {
             entry("2025-01-10", 8.0, 1, false),
         ];
         let as_of = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
-        let ytd = year_to_date_balance(&entries, 2025, None, 8.0, &[], -10.0, as_of);
+        let ytd = year_to_date_balance(&entries, 2025, None, 8.0, &[], -10.0, 0.0, as_of);
 
         // total = −10 + (40 − 64) = −34
         assert!((ytd.total_balance - (-34.0)).abs() < 1e-9);
@@ -575,13 +580,49 @@ mod tests {
             },
         ];
         let as_of = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
-        let ytd = year_to_date_balance(&entries, 2025, None, 8.0, &holidays, 0.0, as_of);
+        let ytd = year_to_date_balance(&entries, 2025, None, 8.0, &holidays, 0.0, 0.0, as_of);
 
         // 8 working days × 8h − 16h holidays = 48h expected
         assert_eq!(ytd.period.expected_hours, 48.0);
         // 40h worked − 48h expected = −8h
         assert_eq!(ytd.period.balance_hours, -8.0);
         assert_eq!(ytd.total_balance, -8.0);
+    }
+
+    // --- year_to_date_balance with manual adjustments ---
+
+    #[test]
+    fn test_year_to_date_with_positive_adjustment() {
+        let entries = vec![
+            entry("2025-01-06", 8.0, 1, false),
+            entry("2025-01-07", 8.0, 1, false),
+            entry("2025-01-08", 8.0, 1, false),
+            entry("2025-01-09", 8.0, 1, false),
+            entry("2025-01-10", 8.0, 1, false),
+        ];
+        let as_of = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
+        // 5.0h carryover + 10.0h manual adjustment
+        let ytd = year_to_date_balance(&entries, 2025, None, 8.0, &[], 5.0, 10.0, as_of);
+        assert_eq!(ytd.manual_adjustments_hours, 10.0);
+        // total = 5.0 + (40 − 64) + 10.0 = −9.0
+        assert!((ytd.total_balance - (-9.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_year_to_date_with_negative_adjustment() {
+        let entries = vec![
+            entry("2025-01-06", 8.0, 1, false),
+            entry("2025-01-07", 8.0, 1, false),
+            entry("2025-01-08", 8.0, 1, false),
+            entry("2025-01-09", 8.0, 1, false),
+            entry("2025-01-10", 8.0, 1, false),
+        ];
+        let as_of = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
+        // −8h payout adjustment
+        let ytd = year_to_date_balance(&entries, 2025, None, 8.0, &[], 0.0, -8.0, as_of);
+        assert_eq!(ytd.manual_adjustments_hours, -8.0);
+        // total = 0.0 + (40 − 64) + (−8.0) = −32.0
+        assert!((ytd.total_balance - (-32.0)).abs() < 1e-9);
     }
 
     // --- holiday_stats ---

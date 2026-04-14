@@ -194,6 +194,14 @@ impl EasyHarvest {
                     return Task::none();
                 }
 
+                // Validate envelope: end must be after start when both are set.
+                if let (Some(s), Some(e)) = (day.start_time, day.end_time) {
+                    if e <= s {
+                        self.error_banner = Some("End time must be after start time".into());
+                        return Task::none();
+                    }
+                }
+
                 let mut break_errors = false;
                 let breaks: Vec<_> = self.work_day_edit.break_inputs.iter().filter_map(|(s, e)| {
                     let start = match NaiveTime::parse_from_str(s, "%H:%M") {

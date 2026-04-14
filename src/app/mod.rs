@@ -13,10 +13,11 @@ use crate::state::persistence::WorkDayStore;
 use crate::state::bootstrap::BootstrapConfig;
 use crate::state::settings::{swiss_public_holidays, PublicHoliday, Settings};
 use crate::state::templates::Templates;
+use crate::state::overtime_adjustments::OvertimeAdjustmentStore;
 #[cfg(not(target_os = "macos"))]
 use crate::state::work_day::WorkPhase;
 use crate::stats::{year_to_date_balance, HolidayStats, YearBalance};
-use crate::ui::{billable_view, day_view, settings_view, stats_view, vacation_view};
+use crate::ui::{billable_view, day_view, project_tracking_view, settings_view, stats_view, vacation_view};
 
 mod tasks;
 mod update;
@@ -28,10 +29,12 @@ mod billable;
 mod stats;
 mod subscription;
 mod view;
+mod project_tracking;
 
 pub use billable::BillableMsg;
 pub use billable::{BillablePageState, BillableSummary};
 pub use stats::StatsMsg;
+pub use stats::OvertimeAdjustmentForm;
 pub use vacation::VacationMsg;
 pub use vacation::{VacationForm, VacationPageState, VacationSummary};
 pub use work_day::WorkDayMsg;
@@ -42,6 +45,8 @@ pub use entries::EntryMsg;
 pub use entries::EntryForm;
 pub use settings::SettingsMsg;
 pub use settings::{SettingsFormState, ValidatedProfile, ValidatedCarryover, TemplateFormState};
+pub use project_tracking::ProjectTrackingMsg;
+pub use project_tracking::{ProjectTrackingPageState, BudgetSummary, BudgetForm};
 
 #[cfg(test)]
 mod tests;
@@ -145,6 +150,7 @@ pub enum Page {
     Stats,
     Vacation,
     Billable,
+    ProjectTracking,
 }
 
 // ── Sub-state structs ────────────────────────────────────────────────────────
@@ -191,6 +197,9 @@ pub enum Message {
     // Billable
     Billable(BillableMsg),
 
+    // Project Tracking
+    ProjectTracking(ProjectTrackingMsg),
+
     // Window lifecycle
     WindowIdReceived(Option<window::Id>),
     WindowCloseRequested(window::Id),
@@ -222,6 +231,7 @@ pub struct EasyHarvest {
     pub vacation_gen: u64,
     pub billable_gen: u64,
     pub stats_gen: u64,
+    pub project_tracking_gen: u64,
 
     // Sub-states
     pub settings_form: SettingsFormState,
@@ -229,6 +239,7 @@ pub struct EasyHarvest {
     pub work_day_edit: WorkDayEditState,
     pub vacation: VacationPageState,
     pub billable: BillablePageState,
+    pub project_tracking: ProjectTrackingPageState,
     pub date_picker: DatePickerState,
 
     pub window_id: Option<window::Id>,
@@ -243,6 +254,8 @@ pub struct EasyHarvest {
 
     // Overtime tab
     pub overtime_year: i32,
+    pub overtime_adjustments: OvertimeAdjustmentStore,
+    pub overtime_adj_form: Option<OvertimeAdjustmentForm>,
 
     // Cached computations
     pub cached_project_options: Vec<ProjectOption>,
@@ -317,14 +330,30 @@ pub fn run() -> iced::Result {
 
 impl EasyHarvest {
     pub(crate) fn new() -> (Self, Task<Message>) {
+        #[cfg(debug_assertions)]
+        let t0 = std::time::Instant::now();
+
         let settings = Settings::load(&BootstrapConfig::load().data_dir);
+        #[cfg(debug_assertions)]
+        eprintln!("[startup] Settings::load          {:?}", t0.elapsed());
+
         let today = Local::now().naive_local().date();
         let work_day_store =
             WorkDayStore::load(&settings.data_dir, today.year(), today.month());
+        #[cfg(debug_assertions)]
+        eprintln!("[startup] WorkDayStore::load       {:?}", t0.elapsed());
+
         let favorites = Favorites::load(&settings.data_dir);
         let templates = Templates::load(&settings.data_dir);
+        let project_tracking = ProjectTrackingPageState::new(&settings.data_dir, today.year());
+        let overtime_adjustments = OvertimeAdjustmentStore::load(&settings.data_dir);
+        #[cfg(debug_assertions)]
+        eprintln!("[startup] JSON loads done          {:?}", t0.elapsed());
 
         let token = Settings::load_token(&settings.data_dir);
+        #[cfg(debug_assertions)]
+        eprintln!("[startup] load_token (keyring)     {:?}", t0.elapsed());
+
         let client = token.as_ref().and_then(|t| {
             HarvestClient::new(t.clone(), settings.account_id.clone()).ok()
         });
@@ -365,6 +394,7 @@ impl EasyHarvest {
             vacation_gen: 0,
             billable_gen: 0,
             stats_gen: 0,
+            project_tracking_gen: 0,
             settings_form: SettingsFormState {
                 weekly_hours_input: init_weekly,
                 percentage_input: init_pct,
@@ -379,6 +409,7 @@ impl EasyHarvest {
             vacation: VacationPageState::new(today.year()),
             date_picker: DatePickerState::new(today),
             billable: BillablePageState::new(today.year()),
+            project_tracking,
             window_id: None,
             // Optimistically assume the tray works on Linux/Windows; set to false
             // only if the tray subscription reports a spawn failure.
@@ -387,6 +418,8 @@ impl EasyHarvest {
             // Skip the data-folder step if the user has already configured it.
             wizard_step: if BootstrapConfig::config_path().exists() { 1 } else { 0 },
             overtime_year: today.year(),
+            overtime_adjustments,
+            overtime_adj_form: None,
             templates,
             cached_project_options: Vec::new(),
             cached_expected_hours: 0.0,
@@ -412,6 +445,9 @@ impl EasyHarvest {
         } else {
             open_task.map(|id| Message::WindowIdReceived(Some(id)))
         };
+
+        #[cfg(debug_assertions)]
+        eprintln!("[startup] EasyHarvest::new total   {:?}", t0.elapsed());
 
         (state, task)
     }

@@ -97,6 +97,7 @@ impl EasyHarvest {
                 self.vacation.entries.clear();
                 self.vacation.entries.shrink_to_fit();
                 self.vacation.summary = None;
+                self.vacation.form = None;
                 if self.client.is_some() {
                     self.loading = true;
                     self.vacation_gen += 1;
@@ -111,6 +112,7 @@ impl EasyHarvest {
                 self.vacation.entries.clear();
                 self.vacation.entries.shrink_to_fit();
                 self.vacation.summary = None;
+                self.vacation.form = None;
                 if self.client.is_some() {
                     self.loading = true;
                     self.vacation_gen += 1;
@@ -255,9 +257,19 @@ impl EasyHarvest {
                 match result {
                     Ok(new_entries) => {
                         self.vacation.form = None;
-                        self.vacation.entries.extend(new_entries);
-                        self.vacation.entries.sort_by(|a, b| a.spent_date.cmp(&b.spent_date));
-                        self.recompute_vacation_summary();
+                        // Only apply entries that match the currently displayed year;
+                        // discard stale results that arrived after a year navigation.
+                        let current_year = self.vacation.year;
+                        let year_prefix = format!("{}-", current_year);
+                        let matching: Vec<_> = new_entries
+                            .into_iter()
+                            .filter(|e| e.spent_date.starts_with(&year_prefix))
+                            .collect();
+                        if !matching.is_empty() {
+                            self.vacation.entries.extend(matching);
+                            self.vacation.entries.sort_by(|a, b| a.spent_date.cmp(&b.spent_date));
+                            self.recompute_vacation_summary();
+                        }
                     }
                     Err(e) => {
                         if let Some(f) = &mut self.vacation.form {

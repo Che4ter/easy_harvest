@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Easy Harvest
+Comment=Time tracking with Harvest
+Exec=easy_harvest
+Icon=easy_harvest
+Categories=Office;ProjectManagement;

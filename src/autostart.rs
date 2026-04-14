@@ -9,6 +9,14 @@ pub fn enable() -> Result<(), String> {
     platform::enable()
 }
 
+/// Installs the app icon to the freedesktop hicolor icon theme on Linux so that
+/// `.desktop` files with `Icon=easy_harvest` resolve correctly.  No-op on
+/// non-Linux platforms.
+pub fn install_icon() {
+    #[cfg(target_os = "linux")]
+    platform::install_icon();
+}
+
 /// Removes the platform-specific autostart entry.
 /// Returns `Err` with a description if the operation failed.
 pub fn disable() -> Result<(), String> {
@@ -41,10 +49,34 @@ mod platform {
         std::fs::create_dir_all(path.parent().expect("desktop path always has a parent"))
             .map_err(|e| e.to_string())?;
         let content = format!(
-            "[Desktop Entry]\nType=Application\nName=Easy Harvest\nExec=\"{}\"\nHidden=false\nX-GNOME-Autostart-enabled=true\n",
+            "[Desktop Entry]\nType=Application\nName=Easy Harvest\nExec=\"{}\"\nIcon=easy_harvest\nHidden=false\nX-GNOME-Autostart-enabled=true\n",
             exe.display()
         );
         std::fs::write(&path, content).map_err(|e| e.to_string())
+    }
+
+    /// Write the embedded 128×128 PNG to the freedesktop hicolor icon theme so
+    /// `Icon=easy_harvest` resolves in both the autostart `.desktop` and any
+    /// manually-installed launcher entry.
+    pub fn install_icon() {
+        const ICON_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/easy_harvest_128.png"));
+
+        let Some(data_home) = dirs::data_dir() else { return; };
+        let icon_dir = data_home.join("icons/hicolor/128x128/apps");
+        if std::fs::create_dir_all(&icon_dir).is_err() {
+            return;
+        }
+        let icon_path = icon_dir.join("easy_harvest.png");
+        let _ = std::fs::write(&icon_path, ICON_PNG);
+
+        // Best-effort: update the icon cache so the icon is visible immediately.
+        let _ = std::process::Command::new("gtk-update-icon-cache")
+            .arg("-f")
+            .arg("-t")
+            .arg(data_home.join("icons/hicolor"))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 
     pub fn disable() -> Result<(), String> {

@@ -35,3 +35,11 @@ pub fn load_json<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
         }
     }
 }
+
+/// Like [`load_json`], but returns `None` silently on parse failure without
+/// logging or backing up.  Use this for the *first* attempt in migration
+/// scenarios where a different schema will be tried next.
+pub fn try_load_json<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&contents).ok()
+}

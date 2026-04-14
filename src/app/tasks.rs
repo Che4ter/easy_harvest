@@ -66,6 +66,7 @@ impl EasyHarvest {
         let holiday_task_ids = self.settings.holiday_task_ids.clone();
         let total_holiday_days = self.settings.effective_holiday_days_for(year);
         let first_work_day = self.settings.first_work_day;
+        let adj_total = self.overtime_adjustments.adjustments_total(year);
         let gen = self.stats_gen;
 
         Task::perform(
@@ -93,6 +94,7 @@ impl EasyHarvest {
                     expected_per_day,
                     &public_holidays,
                     carryover,
+                    adj_total,
                     balance_end,
                 );
                 let holidays = crate::stats::holiday_stats(
@@ -306,6 +308,87 @@ impl EasyHarvest {
         tasks.sort_by(|a, b| a.1.cmp(&b.1));
         self.settings_form.cached_task_list = tasks;
     }
+
+    pub(super) fn load_project_tracking_task(&self) -> Task<Message> {
+        use super::project_tracking::ProjectTrackingMsg;
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let year = self.project_tracking.year;
+        let gen = self.project_tracking_gen;
+
+        let from = format!("{year}-01-01");
+        let today = Local::now().naive_local().date();
+        let to = if year < today.year() {
+            format!("{year}-12-31")
+        } else {
+            today.format("%Y-%m-%d").to_string()
+        };
+
+        // Collect all project IDs from this year's budgets.
+        let all_project_ids: std::collections::HashSet<i64> = self
+            .project_tracking
+            .budgets
+            .budgets_for(year)
+            .iter()
+            .flat_map(|b| b.project_ids.iter().copied())
+            .collect();
+
+        Task::perform(
+            async move {
+                let all_entries = client
+                    .list_all_time_entries(&from, &to)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let filtered: Vec<_> = all_entries
+                    .into_iter()
+                    .filter(|e| all_project_ids.contains(&e.project.id))
+                    .collect();
+                Ok(filtered)
+            },
+            move |result| Message::ProjectTracking(ProjectTrackingMsg::EntriesLoaded(gen, result)),
+        )
+    }
+
+    pub(super) fn recompute_project_tracking_summaries(&mut self) {
+        let year = self.project_tracking.year;
+        let entries = &self.project_tracking.entries;
+        self.project_tracking.summaries = compute_budget_summaries(
+            self.project_tracking.budgets.budgets_for(year),
+            entries,
+        );
+    }
+}
+
+// ── Budget summary computation (pure, testable) ────────────────────────────
+
+pub(super) fn compute_budget_summaries(
+    budgets: &[crate::state::project_budgets::ProjectBudget],
+    entries: &[crate::harvest::models::TimeEntry],
+) -> Vec<super::project_tracking::BudgetSummary> {
+    budgets
+        .iter()
+        .map(|budget| {
+            let used_hours: f64 = entries
+                .iter()
+                .filter(|e| budget.project_ids.contains(&e.project.id))
+                .filter(|e| budget.task_ids.is_empty() || budget.task_ids.contains(&e.task.id))
+                .map(|e| e.hours)
+                .sum();
+            let remaining_hours = budget.budget_hours - used_hours;
+            let pct_used = if budget.budget_hours > 0.0 {
+                used_hours / budget.budget_hours
+            } else {
+                0.0
+            };
+            super::project_tracking::BudgetSummary {
+                budget: budget.clone(),
+                used_hours,
+                remaining_hours,
+                pct_used,
+            }
+        })
+        .collect()
 }
 
 // ── Vacation entry builder (pure, testable) ─────────────────────────────────

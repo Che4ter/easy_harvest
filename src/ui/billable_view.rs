@@ -25,7 +25,9 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         Space::new().width(10).height(10),
         nav_arrow_btn("›").on_press(Message::Billable(BillableMsg::YearNext)),
         Space::new().width(Length::Fill),
-        refresh_btn("↻  Refresh").on_press(Message::Billable(BillableMsg::Refresh)),
+        refresh_btn("↻  Refresh").on_press_maybe(
+            if state.loading { None } else { Some(Message::Billable(BillableMsg::Refresh)) }
+        ),
     ]
     .align_y(Alignment::Center);
 
@@ -174,7 +176,6 @@ fn pct_chip(pct: f64, color: Color) -> Element<'static, Message> {
     container(
         column![
             text(format!("{:.1}%", pct * 100.0)).font(FONT_SEMIBOLD).size(20).color(color),
-            text("").font(FONT_REGULAR).size(12),
             caption("billable"),
         ]
         .spacing(2)

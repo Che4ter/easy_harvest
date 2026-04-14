@@ -21,6 +21,10 @@ fn main() {
         .to_rgba8();
     std::fs::write(format!("{out}/window_64.rgba8"), rgba64.into_raw()).unwrap();
 
+    // ── App icon PNG at 128 × 128 (for Linux .desktop / freedesktop install) ─
+    let png128 = logo.resize_exact(128, 128, FilterType::Lanczos3);
+    png128.save(format!("{out}/easy_harvest_128.png")).unwrap();
+
     // ── Windows executable icon (.ico) ───────────────────────────────────────
     // Generate a multi-resolution .ico from the logo, then embed it as a
     // Windows resource so Explorer, taskbar, etc. show the app icon.
@@ -50,8 +54,9 @@ fn main() {
         encoder.encode_images(&images).expect("write ico");
     }
 
-    #[cfg(target_os = "windows")]
-    {
+    // Embed the .ico as a Windows PE resource when targeting Windows,
+    // regardless of the host OS (supports cross-compilation).
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let mut res = winresource::WindowsResource::new();
         res.set_icon(&ico_path);
         res.compile().expect("winresource compile");

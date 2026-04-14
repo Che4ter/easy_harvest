@@ -4,7 +4,7 @@ use iced::{Alignment, Color, Element, Length};
 
 use crate::app::{
     EasyHarvest, Message, VacationForm, VacationMsg, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR,
-    FONT_SEMIBOLD, SUCCESS, SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY,
+    FONT_SEMIBOLD, SUCCESS, TEXT_MUTED, TEXT_PRIMARY,
 };
 use crate::harvest::models::TimeEntry;
 use super::{
@@ -35,7 +35,9 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         Space::new().width(10).height(10),
         nav_arrow_btn("›").on_press(Message::Vacation(VacationMsg::YearNext)),
         Space::new().width(Length::Fill),
-        refresh_btn("↻  Refresh").on_press(Message::Vacation(VacationMsg::Refresh)),
+        refresh_btn("↻  Refresh").on_press_maybe(
+            if state.loading { None } else { Some(Message::Vacation(VacationMsg::Refresh)) }
+        ),
         Space::new().width(8).height(8),
         primary_btn(add_label).on_press(add_msg),
     ]
@@ -227,7 +229,7 @@ fn vacation_form_view<'a>(form: &VacationForm, expected_per_day: f64, state: &'a
 
     let date_inputs = row![
         column![
-            text("From").font(FONT_MEDIUM).size(12).color(TEXT_MUTED),
+            super::field_label("From"),
             text_input("DD.MM.YYYY", &form.from_input)
                 .style(input_style)
                 .size(13)
@@ -238,7 +240,7 @@ fn vacation_form_view<'a>(form: &VacationForm, expected_per_day: f64, state: &'a
         .width(Length::Fill),
         Space::new().width(10).height(10),
         column![
-            text("To").font(FONT_MEDIUM).size(12).color(TEXT_MUTED),
+            super::field_label("To"),
             text_input("DD.MM.YYYY  (same as From = single day)", &form.to_input)
                 .style(input_style)
                 .size(13)
@@ -281,20 +283,7 @@ fn vacation_form_view<'a>(form: &VacationForm, expected_per_day: f64, state: &'a
     .spacing(10);
 
     let card = container(form_content)
-        .style(|_| container::Style {
-            background: Some(iced::Background::Color(SURFACE_RAISED)),
-            border: iced::Border {
-                color: ACCENT,
-                width: 1.0,
-                radius: 10.0.into(),
-            },
-            shadow: iced::Shadow {
-                color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.2 },
-                offset: iced::Vector::new(0.0, 2.0),
-                blur_radius: 8.0,
-            },
-            ..Default::default()
-        })
+        .style(move |_| super::card_style_bordered(ACCENT))
         .padding([14, 14])
         .width(Length::Fill);
 

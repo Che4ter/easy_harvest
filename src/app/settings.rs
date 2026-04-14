@@ -165,9 +165,11 @@ impl EasyHarvest {
                 self.entries.shrink_to_fit();
                 self.vacation = VacationPageState::default();
                 self.billable = BillablePageState::default();
+                self.project_tracking = ProjectTrackingPageState::default();
                 self.template_form = TemplateFormState::default();
                 self.year_balance = None;
                 self.holiday_stats = None;
+                self.overtime_adj_form = None;
                 self.entry_form = None;
                 self.pending_delete = None;
                 self.templates = Templates::default();
@@ -178,6 +180,7 @@ impl EasyHarvest {
                 self.vacation_gen = 0;
                 self.billable_gen = 0;
                 self.stats_gen = 0;
+                self.project_tracking_gen = 0;
                 // Determine wizard step: skip data-folder step if bootstrap exists.
                 self.wizard_step =
                     if BootstrapConfig::config_path().exists() { 1 } else { 0 };
@@ -263,7 +266,15 @@ impl EasyHarvest {
                         }
                         self.settings.account_id = account_id.clone();
                         self.save_settings_or_warn();
-                        self.client = HarvestClient::new(token, account_id).ok();
+                        let client = match HarvestClient::new(token, account_id) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                self.settings_form.error =
+                                    Some(format!("Failed to create HTTP client: {e}"));
+                                return Task::none();
+                            }
+                        };
+                        self.client = Some(client);
                         self.loading = true;
                         self.entries_gen += 1;
                         let task = Task::batch([
@@ -545,10 +556,13 @@ impl EasyHarvest {
                 // Clear stale API-fetched data
                 self.assignments.clear();
                 self.entries.clear();
-                self.vacation = VacationPageState::default();
-                self.billable = BillablePageState::default();
+                self.vacation = VacationPageState::new(self.current_date.year());
+                self.billable = BillablePageState::new(self.current_date.year());
+                self.project_tracking = ProjectTrackingPageState::new(&new_dir, self.current_date.year());
                 self.year_balance = None;
                 self.holiday_stats = None;
+                self.overtime_adjustments = OvertimeAdjustmentStore::load(&new_dir);
+                self.overtime_adj_form = None;
                 self.settings_form.data_dir_saved = true;
                 if self.client.is_some() {
                     self.loading = true;

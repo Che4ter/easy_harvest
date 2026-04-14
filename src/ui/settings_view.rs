@@ -641,7 +641,20 @@ fn startup_section(state: &EasyHarvest) -> Element<'_, Message> {
     ]
     .align_y(Alignment::Center);
 
-    container(row_content)
+    let mut col = column![row_content].spacing(SECTION_GAP);
+
+    if cfg!(target_os = "windows") {
+        col = col.push(
+            caption(
+                "Tip: If the tray icon is hidden behind the overflow arrow, \
+                 right-click the taskbar \u{2192} Taskbar settings \u{2192} \
+                 \u{201c}Select which icons appear on the taskbar\u{201d} \
+                 and enable Easy Harvest.",
+            ),
+        );
+    }
+
+    container(col)
         .style(card_style)
         .padding(12)
         .width(Length::Fill)

@@ -1,5 +1,6 @@
 use super::*;
-use super::tasks::build_vacation_entries;
+use super::tasks::{build_vacation_entries, compute_budget_summaries};
+use crate::harvest::models::{ClientRef, ProjectRef, TaskRef, TimeEntry, UserRef};
 
 #[test]
 fn build_vacation_entries_skips_weekends() {
@@ -131,4 +132,267 @@ fn validate_carryover_bad_hours() {
     assert!(f.validate_carryover().is_err());
     let f = carryover_form("2025", "5", "xyz");
     assert!(f.validate_carryover().is_err());
+}
+
+// ── compute_budget_summaries tests ─────────────────────────────────────────
+
+fn make_entry(id: i64, project_id: i64, task_id: i64, hours: f64, billable: bool) -> TimeEntry {
+    TimeEntry {
+        id,
+        spent_date: "2025-06-01".into(),
+        hours,
+        hours_without_timer: None,
+        rounded_hours: None,
+        notes: None,
+        is_locked: false,
+        is_running: false,
+        is_billed: false,
+        approval_status: None,
+        billable,
+        timer_started_at: None,
+        project: ProjectRef { id: project_id, name: format!("P{project_id}"), code: None },
+        task: TaskRef { id: task_id, name: format!("T{task_id}") },
+        client: ClientRef { id: 1, name: "Client".into() },
+        user: UserRef { id: 1, name: None },
+        created_at: String::new(),
+        updated_at: String::new(),
+    }
+}
+
+#[test]
+fn budget_summary_single_budget() {
+    use crate::state::project_budgets::ProjectBudget;
+
+    let budgets = vec![ProjectBudget {
+        id: 1,
+        name: "Test".into(),
+        budget_hours: 100.0,
+        project_ids: vec![10],
+        task_ids: vec![],
+    }];
+    let entries = vec![
+        make_entry(1, 10, 1, 5.0, false),
+        make_entry(2, 10, 2, 3.0, false),
+        make_entry(3, 20, 1, 10.0, false), // different project, should be ignored
+    ];
+    let summaries = compute_budget_summaries(&budgets, &entries);
+    assert_eq!(summaries.len(), 1);
+    assert!((summaries[0].used_hours - 8.0).abs() < f64::EPSILON);
+    assert!((summaries[0].remaining_hours - 92.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn budget_summary_no_matching_entries() {
+    use crate::state::project_budgets::ProjectBudget;
+
+    let budgets = vec![ProjectBudget {
+        id: 1,
+        name: "Empty".into(),
+        budget_hours: 50.0,
+        project_ids: vec![99],
+        task_ids: vec![],
+    }];
+    let entries = vec![make_entry(1, 10, 1, 5.0, false)];
+    let summaries = compute_budget_summaries(&budgets, &entries);
+    assert_eq!(summaries.len(), 1);
+    assert!((summaries[0].used_hours - 0.0).abs() < f64::EPSILON);
+    assert!((summaries[0].remaining_hours - 50.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn budget_summary_task_id_filtering() {
+    use crate::state::project_budgets::ProjectBudget;
+
+    let budgets = vec![ProjectBudget {
+        id: 1,
+        name: "Filtered".into(),
+        budget_hours: 100.0,
+        project_ids: vec![10],
+        task_ids: vec![1], // only task 1
+    }];
+    let entries = vec![
+        make_entry(1, 10, 1, 5.0, false), // matches
+        make_entry(2, 10, 2, 8.0, false), // wrong task, excluded
+    ];
+    let summaries = compute_budget_summaries(&budgets, &entries);
+    assert_eq!(summaries.len(), 1);
+    assert!((summaries[0].used_hours - 5.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn budget_summary_multiple_budgets() {
+    use crate::state::project_budgets::ProjectBudget;
+
+    let budgets = vec![
+        ProjectBudget {
+            id: 1, name: "A".into(), budget_hours: 100.0,
+            project_ids: vec![10], task_ids: vec![],
+        },
+        ProjectBudget {
+            id: 2, name: "B".into(), budget_hours: 50.0,
+            project_ids: vec![20], task_ids: vec![],
+        },
+    ];
+    let entries = vec![
+        make_entry(1, 10, 1, 10.0, false),
+        make_entry(2, 20, 1, 25.0, false),
+    ];
+    let summaries = compute_budget_summaries(&budgets, &entries);
+    assert_eq!(summaries.len(), 2);
+    assert!((summaries[0].used_hours - 10.0).abs() < f64::EPSILON);
+    assert!((summaries[1].used_hours - 25.0).abs() < f64::EPSILON);
+    assert!((summaries[1].pct_used - 0.5).abs() < f64::EPSILON);
+}
+
+// ── BudgetForm::validate tests ─────────────────────────────────────────────
+
+use super::project_tracking::BudgetForm;
+
+#[test]
+fn budget_form_validate_valid() {
+    let form = BudgetForm {
+        name_input: "  Education  ".into(),
+        budget_hours_input: "70,5".into(),
+        selected_projects: vec![(42, "Proj".into(), "Client".into())],
+        ..Default::default()
+    };
+    let v = form.validate().unwrap();
+    assert_eq!(v.name, "Education");
+    assert!((v.budget_hours - 70.5).abs() < f64::EPSILON);
+    assert_eq!(v.project_ids, vec![42]);
+    assert!(v.editing_id.is_none());
+}
+
+#[test]
+fn budget_form_validate_empty_name() {
+    let form = BudgetForm {
+        name_input: "  ".into(),
+        budget_hours_input: "10".into(),
+        selected_projects: vec![(1, "P".into(), "C".into())],
+        ..Default::default()
+    };
+    assert!(form.validate().is_err());
+}
+
+#[test]
+fn budget_form_validate_bad_hours() {
+    let form = BudgetForm {
+        name_input: "Test".into(),
+        budget_hours_input: "abc".into(),
+        selected_projects: vec![(1, "P".into(), "C".into())],
+        ..Default::default()
+    };
+    assert!(form.validate().is_err());
+
+    let form = BudgetForm {
+        name_input: "Test".into(),
+        budget_hours_input: "0".into(),
+        selected_projects: vec![(1, "P".into(), "C".into())],
+        ..Default::default()
+    };
+    assert!(form.validate().is_err());
+
+    let form = BudgetForm {
+        name_input: "Test".into(),
+        budget_hours_input: "-5".into(),
+        selected_projects: vec![(1, "P".into(), "C".into())],
+        ..Default::default()
+    };
+    assert!(form.validate().is_err());
+}
+
+#[test]
+fn budget_form_validate_no_projects() {
+    let form = BudgetForm {
+        name_input: "Test".into(),
+        budget_hours_input: "10".into(),
+        selected_projects: vec![],
+        ..Default::default()
+    };
+    assert!(form.validate().is_err());
+}
+
+#[test]
+fn budget_form_validate_preserves_editing_id() {
+    let form = BudgetForm {
+        name_input: "Test".into(),
+        budget_hours_input: "10".into(),
+        selected_projects: vec![(1, "P".into(), "C".into())],
+        editing_id: Some(42),
+        ..Default::default()
+    };
+    assert_eq!(form.validate().unwrap().editing_id, Some(42));
+}
+
+// ── OvertimeAdjustmentForm::validate tests ─────────────────────────────────
+
+use super::stats::OvertimeAdjustmentForm;
+
+#[test]
+fn adj_form_validate_valid() {
+    let form = OvertimeAdjustmentForm {
+        date_input: "15.06.2025".into(),
+        hours_input: "-8,5".into(),
+        reason_input: " Hours payout ".into(),
+        ..Default::default()
+    };
+    let v = form.validate(2025).unwrap();
+    assert_eq!(v.date, NaiveDate::from_ymd_opt(2025, 6, 15).unwrap());
+    assert!((v.hours - (-8.5)).abs() < f64::EPSILON);
+    assert_eq!(v.reason, "Hours payout");
+}
+
+#[test]
+fn adj_form_validate_iso_date() {
+    let form = OvertimeAdjustmentForm {
+        date_input: "2025-03-01".into(),
+        hours_input: "4".into(),
+        reason_input: "Bonus".into(),
+        ..Default::default()
+    };
+    assert!(form.validate(2025).is_ok());
+}
+
+#[test]
+fn adj_form_validate_bad_date() {
+    let form = OvertimeAdjustmentForm {
+        date_input: "not-a-date".into(),
+        hours_input: "4".into(),
+        reason_input: "Test".into(),
+        ..Default::default()
+    };
+    assert!(form.validate(2025).is_err());
+}
+
+#[test]
+fn adj_form_validate_wrong_year() {
+    let form = OvertimeAdjustmentForm {
+        date_input: "15.06.2024".into(),
+        hours_input: "4".into(),
+        reason_input: "Test".into(),
+        ..Default::default()
+    };
+    assert!(form.validate(2025).is_err());
+}
+
+#[test]
+fn adj_form_validate_zero_hours() {
+    let form = OvertimeAdjustmentForm {
+        date_input: "15.06.2025".into(),
+        hours_input: "0".into(),
+        reason_input: "Test".into(),
+        ..Default::default()
+    };
+    assert!(form.validate(2025).is_err());
+}
+
+#[test]
+fn adj_form_validate_empty_reason() {
+    let form = OvertimeAdjustmentForm {
+        date_input: "15.06.2025".into(),
+        hours_input: "4".into(),
+        reason_input: "  ".into(),
+        ..Default::default()
+    };
+    assert!(form.validate(2025).is_err());
 }

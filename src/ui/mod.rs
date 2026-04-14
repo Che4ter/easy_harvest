@@ -1,5 +1,6 @@
 pub mod billable_view;
 pub mod day_view;
+pub mod project_tracking_view;
 pub mod settings_view;
 pub mod stats_view;
 pub mod vacation_view;
@@ -7,7 +8,7 @@ pub mod vacation_view;
 use iced::widget::{button, column, container, row, text, text_input, Space};
 use iced::{Alignment, Border, Color, Element, Length, Padding};
 
-use crate::app::{Message, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD, SURFACE_HOVER, SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY};
+use crate::app::{Message, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD, SURFACE, SURFACE_HOVER, SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY};
 
 // ── Layout constants ────────────────────────────────────────────────────────
 
@@ -406,6 +407,38 @@ pub fn card_style(_: &iced::Theme) -> container::Style {
             color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.20 },
             offset: iced::Vector::new(0.0, 2.0),
             blur_radius: 8.0,
+        },
+        ..Default::default()
+    }
+}
+
+/// Card style with an additional coloured border — used for highlighted form cards.
+pub fn card_style_bordered(border_color: Color) -> container::Style {
+    container::Style {
+        background: Some(iced::Background::Color(SURFACE_RAISED)),
+        border: Border {
+            color: border_color,
+            width: 1.0,
+            radius: 10.0.into(),
+        },
+        shadow: iced::Shadow {
+            color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.20 },
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 8.0,
+        },
+        ..Default::default()
+    }
+}
+
+/// Flat SURFACE strip with a subtle SURFACE_RAISED border — used for day-view
+/// progress/work-day panels.
+pub fn strip_style(_: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(iced::Background::Color(SURFACE)),
+        border: Border {
+            color: SURFACE_RAISED,
+            width: 1.0,
+            radius: 0.0.into(),
         },
         ..Default::default()
     }

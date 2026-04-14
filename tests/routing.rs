@@ -12,6 +12,7 @@ fn test_message_routing_exhaustiveness() {
         include_str!("../src/app/vacation.rs"),
         include_str!("../src/app/billable.rs"),
         include_str!("../src/app/stats.rs"),
+        include_str!("../src/app/project_tracking.rs"),
     ];
 
     // 1. Extract the `Message` enum block to find all variants
