@@ -1,12 +1,98 @@
 use super::*;
 use super::tasks::build_vacation_entries;
 
-// ── Vacation ─────────────────────────────────────────────────────────────────
+// ── Vacation form ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct VacationForm {
+    pub from_input: String,
+    pub to_input: String,
+    /// true = full day, false = half day
+    pub full_day: bool,
+    /// Which holiday task to book against (relevant when multiple are configured).
+    pub selected_task_id: Option<i64>,
+    pub error: Option<String>,
+    pub submitting: bool,
+}
+
+impl VacationForm {
+    pub fn new() -> Self {
+        Self {
+            from_input: String::new(),
+            to_input: String::new(),
+            full_day: true,
+            selected_task_id: None,
+            error: None,
+            submitting: false,
+        }
+    }
+}
+
+impl Default for VacationForm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VacationSummary {
+    pub used_days: f64,
+    pub booked_days: f64,
+    pub days_remaining: f64,
+    pub total_days: f64,
+    pub carryover_days: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct VacationPageState {
+    pub entries: Vec<TimeEntry>,
+    pub year: i32,
+    pub form: Option<VacationForm>,
+    pub summary: Option<VacationSummary>,
+}
+
+impl VacationPageState {
+    pub fn new(year: i32) -> Self {
+        Self {
+            entries: Vec::new(),
+            year,
+            form: None,
+            summary: None,
+        }
+    }
+}
+
+impl Default for VacationPageState {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+// ── Vacation messages ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum VacationMsg {
+    Refresh,
+    YearPrev,
+    YearNext,
+    EntriesLoaded(u64, Result<Vec<TimeEntry>, String>),
+    ShowForm,
+    HideForm,
+    FromChanged(String),
+    ToChanged(String),
+    DayTypeFull,
+    DayTypeHalf,
+    TaskSelected(i64),
+    FormSubmit,
+    EntriesCreated(Result<Vec<TimeEntry>, String>),
+    DeleteEntry(i64),
+    EntryDeleted(Result<i64, String>),
+}
 
 impl EasyHarvest {
-    pub(super) fn update_vacation(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::VacationYearPrev => {
+    pub(super) fn update_vacation(&mut self, msg: VacationMsg) -> Task<Message> {
+        match msg {
+            VacationMsg::YearPrev => {
                 self.vacation.year -= 1;
                 self.vacation.entries.clear();
                 self.vacation.entries.shrink_to_fit();
@@ -20,7 +106,7 @@ impl EasyHarvest {
                 }
             }
 
-            Message::VacationYearNext => {
+            VacationMsg::YearNext => {
                 self.vacation.year += 1;
                 self.vacation.entries.clear();
                 self.vacation.entries.shrink_to_fit();
@@ -34,7 +120,7 @@ impl EasyHarvest {
                 }
             }
 
-            Message::VacationRefresh => {
+            VacationMsg::Refresh => {
                 self.vacation.entries.clear();
                 self.vacation.entries.shrink_to_fit();
                 self.vacation.summary = None;
@@ -47,7 +133,7 @@ impl EasyHarvest {
                 }
             }
 
-            Message::VacationEntriesLoaded(gen, result) => {
+            VacationMsg::EntriesLoaded(gen, result) => {
                 if gen != self.vacation_gen { return Task::none(); }
                 self.loading = false;
                 match result {
@@ -60,17 +146,19 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::VacationShowForm => {
-                self.vacation.form = Some(VacationForm::new());
+            VacationMsg::ShowForm => {
+                let mut form = VacationForm::new();
+                form.selected_task_id = self.settings.holiday_task_ids.first().copied();
+                self.vacation.form = Some(form);
                 Task::none()
             }
 
-            Message::VacationHideForm => {
+            VacationMsg::HideForm => {
                 self.vacation.form = None;
                 Task::none()
             }
 
-            Message::VacationFromChanged(v) => {
+            VacationMsg::FromChanged(v) => {
                 if let Some(f) = &mut self.vacation.form {
                     f.from_input = v;
                     f.error = None;
@@ -78,7 +166,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::VacationToChanged(v) => {
+            VacationMsg::ToChanged(v) => {
                 if let Some(f) = &mut self.vacation.form {
                     f.to_input = v;
                     f.error = None;
@@ -86,17 +174,25 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::VacationDayTypeFull => {
+            VacationMsg::DayTypeFull => {
                 if let Some(f) = &mut self.vacation.form { f.full_day = true; }
                 Task::none()
             }
 
-            Message::VacationDayTypeHalf => {
+            VacationMsg::DayTypeHalf => {
                 if let Some(f) = &mut self.vacation.form { f.full_day = false; }
                 Task::none()
             }
 
-            Message::VacationFormSubmit => {
+            VacationMsg::TaskSelected(task_id) => {
+                if let Some(f) = &mut self.vacation.form {
+                    f.selected_task_id = Some(task_id);
+                    f.error = None;
+                }
+                Task::none()
+            }
+
+            VacationMsg::FormSubmit => {
                 let Some(form) = &mut self.vacation.form else { return Task::none(); };
                 let parse = |s: &str| {
                     NaiveDate::parse_from_str(s.trim(), "%d.%m.%Y")
@@ -116,9 +212,8 @@ impl EasyHarvest {
                         let hours_full = self.settings.expected_hours_per_day();
                         let hours = if full_day { hours_full } else { hours_full / 2.0 };
                         // find project_id + task_id from assignments
-                        let task_id = self.settings.holiday_task_ids.first().copied();
-                        let Some(task_id) = task_id else {
-                            form.error = Some("No holiday task configured in Settings.".into());
+                        let Some(task_id) = form.selected_task_id else {
+                            form.error = Some("Please select a holiday task.".into());
                             return Task::none();
                         };
                         let project_id = self.assignments.iter().find_map(|a| {
@@ -153,7 +248,7 @@ impl EasyHarvest {
                 }
             }
 
-            Message::VacationEntriesCreated(result) => {
+            VacationMsg::EntriesCreated(result) => {
                 if let Some(f) = &mut self.vacation.form {
                     f.submitting = false;
                 }
@@ -173,7 +268,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::VacationDeleteEntry(id) => {
+            VacationMsg::DeleteEntry(id) => {
                 let Some(client) = self.client.clone() else { return Task::none(); };
                 Task::perform(
                     async move {
@@ -181,11 +276,11 @@ impl EasyHarvest {
                             .map(|_| id)
                             .map_err(|e| e.to_string())
                     },
-                    Message::VacationEntryDeleted,
+                    |result| Message::Vacation(VacationMsg::EntryDeleted(result)),
                 )
             }
 
-            Message::VacationEntryDeleted(result) => {
+            VacationMsg::EntryDeleted(result) => {
                 match result {
                     Ok(id) => {
                         self.vacation.entries.retain(|e| e.id != id);
@@ -195,8 +290,6 @@ impl EasyHarvest {
                 }
                 Task::none()
             }
-
-            _ => unreachable!(),
         }
     }
 }

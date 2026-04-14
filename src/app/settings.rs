@@ -1,7 +1,144 @@
 use super::*;
 use super::tasks::format_harvest_error;
 
-// ── Settings ─────────────────────────────────────────────────────────────────
+// ── Settings sub-state ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct SettingsFormState {
+    pub token_input: String,
+    pub account_input: String,
+    pub connecting: bool,
+    pub error: Option<String>,
+    pub weekly_hours_input: String,
+    pub percentage_input: String,
+    pub holidays_input: String,
+    pub first_work_day_input: String,
+    pub profile_saved: bool,
+    pub profile_error: Option<String>,
+    pub carryover_year_input: String,
+    pub carryover_holiday_input: String,
+    pub carryover_overtime_input: String,
+    pub carryover_error: Option<String>,
+    pub holiday_view_year: i32,
+    pub cached_holidays: Vec<PublicHoliday>,
+    pub holiday_task_query: String,
+    pub data_dir_input: String,
+    pub data_dir_saved: bool,
+    /// Cached deduped task list for holiday_tasks_section: (task_id, task_name, context).
+    pub cached_task_list: Vec<(i64, String, String)>,
+}
+
+impl SettingsFormState {
+    pub fn new(year: i32) -> Self {
+        Self {
+            holiday_view_year: year,
+            cached_holidays: swiss_public_holidays(year),
+            ..Default::default()
+        }
+    }
+
+    pub fn validate_profile(&self) -> Result<ValidatedProfile, String> {
+        let weekly_hours: f64 = self.weekly_hours_input.replace(',', ".").parse()
+            .ok()
+            .filter(|&v: &f64| v > 0.0 && v <= 168.0)
+            .ok_or_else(|| "Invalid weekly hours (must be 1\u{2013}168)".to_string())?;
+        let percentage: f64 = self.percentage_input.replace(',', ".").parse::<f64>()
+            .ok()
+            .filter(|&v| v > 0.0 && v <= 100.0)
+            .map(|v| v / 100.0)
+            .ok_or_else(|| "Invalid percentage (1\u{2013}100)".to_string())?;
+        let holidays: u32 = self.holidays_input.parse::<u32>()
+            .ok()
+            .filter(|&v| v <= 365)
+            .ok_or_else(|| "Invalid holiday days".to_string())?;
+        let raw = self.first_work_day_input.trim();
+        let first_work_day = if raw.is_empty() {
+            None
+        } else {
+            Some(NaiveDate::parse_from_str(raw, "%d.%m.%Y")
+                .map_err(|_| "Invalid first work day \u{2014} use DD.MM.YYYY".to_string())?)
+        };
+        Ok(ValidatedProfile { weekly_hours, percentage, holidays, first_work_day })
+    }
+
+    pub fn validate_carryover(&self) -> Result<ValidatedCarryover, String> {
+        let year: i32 = self.carryover_year_input.trim().parse()
+            .ok()
+            .filter(|y: &i32| (2000..=2100).contains(y))
+            .ok_or_else(|| "Invalid year (2000\u{2013}2100)".to_string())?;
+        let holiday_days: f64 = self.carryover_holiday_input.replace(',', ".").parse()
+            .map_err(|_| "Invalid holiday days".to_string())?;
+        let overtime_hours: f64 = self.carryover_overtime_input.replace(',', ".").parse()
+            .map_err(|_| "Invalid overtime hours".to_string())?;
+        Ok(ValidatedCarryover { year, holiday_days, overtime_hours })
+    }
+}
+
+pub struct ValidatedProfile {
+    pub weekly_hours: f64,
+    pub percentage: f64,
+    pub holidays: u32,
+    pub first_work_day: Option<NaiveDate>,
+}
+
+pub struct ValidatedCarryover {
+    pub year: i32,
+    pub holiday_days: f64,
+    pub overtime_hours: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TemplateFormState {
+    pub open: bool,
+    pub label: String,
+    pub project_query: String,
+    pub project_idx: Option<usize>,
+    pub hours: String,
+    pub notes: String,
+    pub error: Option<String>,
+}
+
+// ── Settings messages ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum SettingsMsg {
+    Disconnect,
+    WizardNext,
+    WizardBack,
+    WizardUseDefault,
+    TokenChanged(String),
+    AccountIdChanged(String),
+    Save,
+    Connected(Result<String, String>),
+    WeeklyHoursChanged(String),
+    PercentageChanged(String),
+    HolidaysChanged(String),
+    FirstWorkDayChanged(String),
+    SaveProfile,
+    CarryoverYearChanged(String),
+    CarryoverHolidayChanged(String),
+    CarryoverOvertimeChanged(String),
+    CarryoverSave,
+    CarryoverDelete(i32),
+    HolidayTaskToggle(i64),
+    HolidayTaskQueryChanged(String),
+    DataDirChanged(String),
+    PickDataDir,
+    DataDirPicked(Option<std::path::PathBuf>),
+    SaveDataDir,
+    AutostartToggle,
+    HolidayViewYearPrev,
+    HolidayViewYearNext,
+    TemplateAddOpen,
+    TemplateAddCancel,
+    TemplateAddLabelChanged(String),
+    TemplateAddProjectQueryChanged(String),
+    TemplateAddProjectSelected(usize),
+    TemplateAddHoursChanged(String),
+    TemplateAddNotesChanged(String),
+    TemplateAddSave,
+    TemplateDelete(usize),
+}
 
 impl EasyHarvest {
     /// Save settings and surface any error via the error banner.
@@ -11,9 +148,9 @@ impl EasyHarvest {
         }
     }
 
-    pub(super) fn update_settings(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::Disconnect => {
+    pub(super) fn update_settings(&mut self, msg: SettingsMsg) -> Task<Message> {
+        match msg {
+            SettingsMsg::Disconnect => {
                 // Clear token from keyring and file.
                 if let Ok(entry) = keyring::Entry::new("easy_harvest", "harvest_api_token") {
                     let _ = entry.delete_credential();
@@ -48,10 +185,12 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::WizardNext => {
+            SettingsMsg::WizardNext => {
                 // Save the chosen data folder and advance to credentials step.
                 let new_dir = std::path::PathBuf::from(self.settings_form.data_dir_input.trim());
-                let _ = BootstrapConfig { data_dir: new_dir.clone() }.save();
+                if let Err(e) = (BootstrapConfig { data_dir: new_dir.clone() }).save() {
+                    self.error_banner = Some(format!("Failed to save bootstrap config: {e}"));
+                }
                 if new_dir != self.settings.data_dir {
                     self.settings.data_dir = new_dir;
                     self.save_settings_or_warn();
@@ -60,23 +199,29 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::WizardBack => {
+            SettingsMsg::WizardBack => {
                 self.wizard_step = 0;
                 self.settings_form.data_dir_input = self.settings.data_dir.display().to_string();
                 Task::none()
             }
 
-            Message::SettingsTokenChanged(t) => {
+            SettingsMsg::WizardUseDefault => {
+                self.settings_form.data_dir_input =
+                    crate::state::bootstrap::default_data_dir().display().to_string();
+                Task::done(Message::Settings(SettingsMsg::WizardNext))
+            }
+
+            SettingsMsg::TokenChanged(t) => {
                 self.settings_form.token_input = t;
                 Task::none()
             }
 
-            Message::SettingsAccountIdChanged(a) => {
+            SettingsMsg::AccountIdChanged(a) => {
                 self.settings_form.account_input = a;
                 Task::none()
             }
 
-            Message::SettingsSave => {
+            SettingsMsg::Save => {
                 let token = self.settings_form.token_input.trim().to_string();
                 let account_id = self.settings_form.account_input.trim().to_string();
                 if token.is_empty() || account_id.is_empty() {
@@ -102,11 +247,11 @@ impl EasyHarvest {
                             .map(|u| format!("{} {}", u.first_name, u.last_name))
                             .map_err(format_harvest_error)
                     },
-                    Message::SettingsConnected,
+                    |result| Message::Settings(SettingsMsg::Connected(result)),
                 )
             }
 
-            Message::SettingsConnected(result) => {
+            SettingsMsg::Connected(result) => {
                 self.settings_form.connecting = false;
                 match result {
                     Ok(_) => {
@@ -135,46 +280,46 @@ impl EasyHarvest {
                 }
             }
 
-            Message::SettingsWeeklyHoursChanged(v) => {
+            SettingsMsg::WeeklyHoursChanged(v) => {
                 self.settings_form.weekly_hours_input = v;
                 self.settings_form.profile_saved = false;
                 Task::none()
             }
 
-            Message::SettingsPercentageChanged(v) => {
+            SettingsMsg::PercentageChanged(v) => {
                 self.settings_form.percentage_input = v;
                 self.settings_form.profile_saved = false;
                 Task::none()
             }
 
-            Message::SettingsHolidaysChanged(v) => {
+            SettingsMsg::HolidaysChanged(v) => {
                 self.settings_form.holidays_input = v;
                 self.settings_form.profile_saved = false;
                 Task::none()
             }
 
-            Message::SettingsFirstWorkDayChanged(v) => {
+            SettingsMsg::FirstWorkDayChanged(v) => {
                 self.settings_form.first_work_day_input = v;
                 self.settings_form.profile_saved = false;
                 Task::none()
             }
 
-            Message::SettingsCarryoverYearChanged(v) => {
+            SettingsMsg::CarryoverYearChanged(v) => {
                 self.settings_form.carryover_year_input = v;
                 Task::none()
             }
 
-            Message::SettingsCarryoverHolidayChanged(v) => {
+            SettingsMsg::CarryoverHolidayChanged(v) => {
                 self.settings_form.carryover_holiday_input = v;
                 Task::none()
             }
 
-            Message::SettingsCarryoverOvertimeChanged(v) => {
+            SettingsMsg::CarryoverOvertimeChanged(v) => {
                 self.settings_form.carryover_overtime_input = v;
                 Task::none()
             }
 
-            Message::SettingsCarryoverSave => {
+            SettingsMsg::CarryoverSave => {
                 let validated = match self.settings_form.validate_carryover() {
                     Ok(v) => v,
                     Err(e) => {
@@ -198,13 +343,13 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::SettingsCarryoverDelete(year) => {
+            SettingsMsg::CarryoverDelete(year) => {
                 self.settings.carryover.remove(&year);
                 self.save_settings_or_warn();
                 Task::none()
             }
 
-            Message::SettingsSaveProfile => {
+            SettingsMsg::SaveProfile => {
                 let profile = match self.settings_form.validate_profile() {
                     Ok(p) => p,
                     Err(e) => {
@@ -229,7 +374,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::HolidayTaskToggle(task_id) => {
+            SettingsMsg::HolidayTaskToggle(task_id) => {
                 if self.settings.holiday_task_ids.contains(&task_id) {
                     self.settings.holiday_task_ids.retain(|&id| id != task_id);
                 } else {
@@ -240,24 +385,24 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::HolidayTaskQueryChanged(v) => {
+            SettingsMsg::HolidayTaskQueryChanged(v) => {
                 self.settings_form.holiday_task_query = v;
                 Task::none()
             }
 
-            Message::HolidayViewYearPrev => {
+            SettingsMsg::HolidayViewYearPrev => {
                 self.settings_form.holiday_view_year -= 1;
                 self.settings_form.cached_holidays = swiss_public_holidays(self.settings_form.holiday_view_year);
                 Task::none()
             }
 
-            Message::HolidayViewYearNext => {
+            SettingsMsg::HolidayViewYearNext => {
                 self.settings_form.holiday_view_year += 1;
                 self.settings_form.cached_holidays = swiss_public_holidays(self.settings_form.holiday_view_year);
                 Task::none()
             }
 
-            Message::SettingsTemplateAddOpen => {
+            SettingsMsg::TemplateAddOpen => {
                 self.template_form.open = true;
                 self.template_form.label = String::new();
                 self.template_form.project_query = String::new();
@@ -268,23 +413,23 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::SettingsTemplateAddCancel => {
+            SettingsMsg::TemplateAddCancel => {
                 self.template_form.open = false;
                 Task::none()
             }
 
-            Message::SettingsTemplateAddLabelChanged(v) => {
+            SettingsMsg::TemplateAddLabelChanged(v) => {
                 self.template_form.label = v;
                 Task::none()
             }
 
-            Message::SettingsTemplateAddProjectQueryChanged(v) => {
+            SettingsMsg::TemplateAddProjectQueryChanged(v) => {
                 self.template_form.project_query = v;
                 self.template_form.project_idx = None;
                 Task::none()
             }
 
-            Message::SettingsTemplateAddProjectSelected(idx) => {
+            SettingsMsg::TemplateAddProjectSelected(idx) => {
                 let opts = self.cached_project_options.clone();
                 if let Some(opt) = opts.get(idx) {
                     self.template_form.project_query = format!(
@@ -296,17 +441,17 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::SettingsTemplateAddHoursChanged(v) => {
+            SettingsMsg::TemplateAddHoursChanged(v) => {
                 self.template_form.hours = v;
                 Task::none()
             }
 
-            Message::SettingsTemplateAddNotesChanged(v) => {
+            SettingsMsg::TemplateAddNotesChanged(v) => {
                 self.template_form.notes = v;
                 Task::none()
             }
 
-            Message::SettingsTemplateAddSave => {
+            SettingsMsg::TemplateAddSave => {
                 let label = self.template_form.label.trim().to_owned();
                 if label.is_empty() {
                     self.template_form.error = Some("Please enter a name.".into());
@@ -336,7 +481,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::SettingsTemplateDelete(idx) => {
+            SettingsMsg::TemplateDelete(idx) => {
                 if idx < self.templates.entries.len() {
                     self.templates.entries.remove(idx);
                     if let Err(e) = self.templates.save(&self.settings.data_dir) {
@@ -346,13 +491,13 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::SettingsDataDirChanged(v) => {
+            SettingsMsg::DataDirChanged(v) => {
                 self.settings_form.data_dir_input = v;
                 self.settings_form.data_dir_saved = false;
                 Task::none()
             }
 
-            Message::SettingsPickDataDir => Task::perform(
+            SettingsMsg::PickDataDir => Task::perform(
                 async {
                     rfd::AsyncFileDialog::new()
                         .set_title("Choose data folder")
@@ -360,17 +505,17 @@ impl EasyHarvest {
                         .await
                         .map(|h| h.path().to_path_buf())
                 },
-                Message::SettingsDataDirPicked,
+                |result| Message::Settings(SettingsMsg::DataDirPicked(result)),
             ),
 
-            Message::SettingsDataDirPicked(maybe_path) => {
+            SettingsMsg::DataDirPicked(maybe_path) => {
                 if let Some(path) = maybe_path {
                     self.settings_form.data_dir_input = path.display().to_string();
                 }
                 Task::none()
             }
 
-            Message::SettingsSaveDataDir => {
+            SettingsMsg::SaveDataDir => {
                 let new_dir = std::path::PathBuf::from(self.settings_form.data_dir_input.trim());
                 if new_dir == self.settings.data_dir {
                     self.settings_form.data_dir_saved = true;
@@ -417,7 +562,7 @@ impl EasyHarvest {
                 }
             }
 
-            Message::SettingsAutostartToggle => {
+            SettingsMsg::AutostartToggle => {
                 let enabled = !self.settings.autostart;
                 let result = if enabled {
                     crate::autostart::enable()
@@ -435,8 +580,6 @@ impl EasyHarvest {
                 }
                 Task::none()
             }
-
-            _ => unreachable!(),
         }
     }
 }

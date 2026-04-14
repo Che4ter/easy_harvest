@@ -1,15 +1,16 @@
 use chrono::{Datelike, Local, NaiveDate};
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::{Alignment, Color, Element, Length};
 
 use crate::app::{
-    EasyHarvest, Message, VacationForm, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR,
+    EasyHarvest, Message, VacationForm, VacationMsg, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR,
     FONT_SEMIBOLD, SUCCESS, SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY,
 };
 use crate::harvest::models::TimeEntry;
 use super::{
     caption, delete_chip_btn, input_style, list_row_style, month_abbr, nav_arrow_btn,
     primary_btn, refresh_btn, stat_chip, toggle_active_style, toggle_inactive_style,
+    LIST_ROW_SPACING, PAGE_PADDING, SECTION_GAP,
 };
 
 const PLANNED_COLOR: Color = Color { r: 0.42, g: 0.71, b: 0.98, a: 1.0 };
@@ -19,22 +20,22 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
     let add_label = if state.vacation.form.is_some() { "✕ Cancel" } else { "+ Add" };
     let add_msg = if state.vacation.form.is_some() {
-        Message::VacationHideForm
+        Message::Vacation(VacationMsg::HideForm)
     } else {
-        Message::VacationShowForm
+        Message::Vacation(VacationMsg::ShowForm)
     };
 
     let year_row = row![
-        nav_arrow_btn("‹").on_press(Message::VacationYearPrev),
+        nav_arrow_btn("‹").on_press(Message::Vacation(VacationMsg::YearPrev)),
         Space::new().width(10).height(10),
         text(year.to_string())
             .font(FONT_SEMIBOLD)
             .size(18)
             .color(TEXT_PRIMARY),
         Space::new().width(10).height(10),
-        nav_arrow_btn("›").on_press(Message::VacationYearNext),
+        nav_arrow_btn("›").on_press(Message::Vacation(VacationMsg::YearNext)),
         Space::new().width(Length::Fill),
-        refresh_btn("↻  Refresh").on_press(Message::VacationRefresh),
+        refresh_btn("↻  Refresh").on_press(Message::Vacation(VacationMsg::Refresh)),
         Space::new().width(8).height(8),
         primary_btn(add_label).on_press(add_msg),
     ]
@@ -45,14 +46,13 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         return scrollable(
             column![
                 year_row,
-                Space::new(),
                 text("Configure holiday tasks in Settings → Holiday Tasks to track vacation.")
                     .font(FONT_REGULAR)
                     .size(13)
                     .color(TEXT_MUTED),
             ]
-            .spacing(0)
-            .padding(Padding { top: 12.0, right: 12.0, bottom: 0.0, left: 12.0 }),
+            .spacing(SECTION_GAP)
+            .padding(PAGE_PADDING),
         )
         .height(Length::Fill)
         .into();
@@ -62,11 +62,10 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         return scrollable(
             column![
                 year_row,
-                Space::new(),
                 text("Loading…").font(FONT_REGULAR).size(13).color(TEXT_MUTED),
             ]
-            .spacing(0)
-            .padding(Padding { top: 12.0, right: 12.0, bottom: 0.0, left: 12.0 }),
+            .spacing(SECTION_GAP)
+            .padding(PAGE_PADDING),
         )
         .height(Length::Fill)
         .into();
@@ -103,7 +102,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
     // Add form
     let form_el: Element<Message> = match &state.vacation.form {
-        Some(form) => vacation_form_view(form, expected_per_day),
+        Some(form) => vacation_form_view(form, expected_per_day, state),
         None => Space::new().into(),
     };
 
@@ -124,15 +123,13 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
                 vacation_row(e, expected_per_day, is_future)
             })
             .collect();
-        column(rows).spacing(4).into()
+        column(rows).spacing(LIST_ROW_SPACING).into()
     };
 
     scrollable(
         column![
             year_row,
-            Space::new(),
             summary_row,
-            Space::new(),
             {
                 let carryover_str = if carryover_days != 0.0 {
                     format!(
@@ -150,13 +147,11 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
                     total_days * expected_per_day
                 ))
             },
-            Space::new(),
             form_el,
             body,
-            Space::new(),
         ]
-        .spacing(0)
-        .padding(Padding { top: 12.0, right: 12.0, bottom: 0.0, left: 12.0 }),
+        .spacing(SECTION_GAP)
+        .padding(PAGE_PADDING),
     )
     .height(Length::Fill)
     .into()
@@ -164,7 +159,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
 // ── Add vacation form ─────────────────────────────────────────────────────────
 
-fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_, Message> {
+fn vacation_form_view<'a>(form: &VacationForm, expected_per_day: f64, state: &'a EasyHarvest) -> Element<'a, Message> {
     let half_h = expected_per_day / 2.0;
     let full_h = expected_per_day;
 
@@ -177,15 +172,58 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
             if full_day { toggle_active_style(6.0) } else { toggle_inactive_style(6.0) }
         })
         .padding([5, 14])
-        .on_press(Message::VacationDayTypeFull);
+        .on_press(Message::Vacation(VacationMsg::DayTypeFull));
     let half_btn = button(text(half_label).font(FONT_MEDIUM).size(12))
         .style(move |_, _: button::Status| {
             if !full_day { toggle_active_style(6.0) } else { toggle_inactive_style(6.0) }
         })
         .padding([5, 14])
-        .on_press(Message::VacationDayTypeHalf);
+        .on_press(Message::Vacation(VacationMsg::DayTypeHalf));
 
     let day_type_row = row![full_btn, Space::new().width(8).height(8), half_btn].align_y(Alignment::Center);
+
+    // Task picker — only shown when multiple holiday tasks are configured
+    let task_picker_el: Element<Message> = if state.settings.holiday_task_ids.len() > 1 {
+        let task_buttons: Vec<Element<Message>> = state
+            .settings
+            .holiday_task_ids
+            .iter()
+            .filter_map(|&tid| {
+                // Resolve task name from assignments
+                let name = state.assignments.iter().find_map(|a| {
+                    a.task_assignments.iter().find(|t| t.task.id == tid).map(|t| t.task.name.clone())
+                })?;
+                let selected = form.selected_task_id == Some(tid);
+                let btn = button(text(name).font(FONT_MEDIUM).size(12))
+                    .style(move |_, _: button::Status| {
+                        if selected { toggle_active_style(6.0) } else { toggle_inactive_style(6.0) }
+                    })
+                    .padding([5, 14])
+                    .on_press(Message::Vacation(VacationMsg::TaskSelected(tid)));
+                Some(btn.into())
+            })
+            .collect();
+        if task_buttons.is_empty() {
+            Space::new().into()
+        } else {
+            column![
+                text("Holiday task").font(FONT_MEDIUM).size(12).color(TEXT_MUTED),
+                iced::widget::Row::with_children(
+                    task_buttons
+                        .into_iter()
+                        .flat_map(|b: Element<Message>| {
+                            vec![b, Space::new().width(8).height(8).into()]
+                        })
+                        .collect::<Vec<_>>()
+                )
+                .align_y(Alignment::Center),
+            ]
+            .spacing(4)
+            .into()
+        }
+    } else {
+        Space::new().into()
+    };
 
     let date_inputs = row![
         column![
@@ -194,7 +232,7 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
                 .style(input_style)
                 .size(13)
                 .padding([8, 10])
-                .on_input(Message::VacationFromChanged),
+                .on_input(|v| Message::Vacation(VacationMsg::FromChanged(v))),
         ]
         .spacing(4)
         .width(Length::Fill),
@@ -205,7 +243,7 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
                 .style(input_style)
                 .size(13)
                 .padding([8, 10])
-                .on_input(Message::VacationToChanged),
+                .on_input(|v| Message::Vacation(VacationMsg::ToChanged(v))),
         ]
         .spacing(4)
         .width(Length::FillPortion(2)),
@@ -229,20 +267,18 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
     let submit_btn: Element<Message> = if form.submitting {
         submit_btn.into()
     } else {
-        submit_btn.on_press(Message::VacationFormSubmit).into()
+        submit_btn.on_press(Message::Vacation(VacationMsg::FormSubmit)).into()
     };
 
     let form_content = column![
         date_inputs,
-        Space::new(),
         day_type_row,
-        Space::new(),
+        task_picker_el,
         hint,
         error_el,
-        Space::new(),
         row![submit_btn].align_y(Alignment::Center),
     ]
-    .spacing(0);
+    .spacing(10);
 
     let card = container(form_content)
         .style(|_| container::Style {
@@ -262,7 +298,7 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
         .padding([14, 14])
         .width(Length::Fill);
 
-    column![card, Space::new()].spacing(0).into()
+    card.into()
 }
 
 // ── Entry row ─────────────────────────────────────────────────────────────────
@@ -273,7 +309,7 @@ fn vacation_row(
     is_future: bool,
 ) -> Element<'_, Message> {
     let date_str = NaiveDate::parse_from_str(&entry.spent_date, "%Y-%m-%d")
-        .map(|d| format!("{:2} {} {}", d.day(), month_abbr(d.month()), d.year()))
+        .map(|d| format!("{:2} {}", d.day(), month_abbr(d.month())))
         .unwrap_or_else(|_| entry.spent_date.clone());
 
     let days = entry.hours / expected_per_day;
@@ -296,7 +332,7 @@ fn vacation_row(
 
     let delete_btn: Element<Message> = if is_future {
         let id = entry.id;
-        delete_chip_btn(Message::VacationDeleteEntry(id))
+        delete_chip_btn(Message::Vacation(VacationMsg::DeleteEntry(id)))
     } else {
         Space::new().into()
     };

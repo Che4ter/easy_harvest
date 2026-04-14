@@ -1,9 +1,9 @@
 use chrono::{Datelike, Local};
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::{Alignment, Color, Element, Length};
 
 use crate::app::{
-    EasyHarvest, Message, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD,
+    EasyHarvest, EntryMsg, Message, SettingsMsg, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD,
     SUCCESS, SURFACE, TEXT_MUTED, TEXT_PRIMARY,
 };
 use super::{
@@ -11,6 +11,7 @@ use super::{
     input_style, month_abbr, nav_arrow_btn, outline_btn, outline_btn_sm,
     outline_btn_style, primary_btn, section_heading, suggestion_btn_style,
     toggle_active_style, toggle_inactive_style, with_alpha,
+    PAGE_PADDING, SECTION_GAP, LIST_ROW_SPACING,
 };
 
 pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
@@ -25,32 +26,22 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
     scrollable(
         column![
             sync_section(state),
-            Space::new(),
             profile_section(state),
-            Space::new(),
             carryover_section(state),
-            Space::new(),
             holidays_section(state),
-            Space::new(),
             holiday_tasks_section(state),
-            Space::new(),
             templates_section(state),
-            Space::new(),
             data_dir_section(state),
-            Space::new(),
             startup_section(state),
-            Space::new(),
             connection_section(state),
-            Space::new(),
             container(
                 caption(concat!("Easy Harvest v", env!("CARGO_PKG_VERSION"))),
             )
             .width(Length::Fill)
             .center_x(Length::Fill),
-            Space::new(),
         ]
-        .spacing(0)
-        .padding(Padding { top: 12.0, right: 12.0, bottom: 0.0, left: 12.0 }),
+        .spacing(SECTION_GAP)
+        .padding(PAGE_PADDING),
     )
     .height(Length::Fill)
     .into()
@@ -60,10 +51,10 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
 fn wizard_data_folder(state: &EasyHarvest) -> Element<'_, Message> {
     let use_default_btn = outline_btn("Use Default")
-        .on_press(Message::WizardNext);   // default is already in the input
+        .on_press(Message::Settings(SettingsMsg::WizardUseDefault));
 
     let continue_btn = primary_btn("Continue  →")
-        .on_press(Message::WizardNext);
+        .on_press(Message::Settings(SettingsMsg::WizardNext));
 
     let card = container(
         column![
@@ -71,7 +62,6 @@ fn wizard_data_folder(state: &EasyHarvest) -> Element<'_, Message> {
                 .font(FONT_SEMIBOLD)
                 .size(20)
                 .color(TEXT_PRIMARY),
-            Space::new(),
             text(
                 "Choose where to store your settings and time-tracking data. \
                  Pointing to a OneDrive or Dropbox folder lets you sync \
@@ -80,21 +70,18 @@ fn wizard_data_folder(state: &EasyHarvest) -> Element<'_, Message> {
             .font(FONT_REGULAR)
             .size(12)
             .color(TEXT_MUTED),
-            Space::new(),
             field_label("Data Folder"),
-            Space::new(),
             row![
                 text_input("Path…", &state.settings_form.data_dir_input)
-                    .on_input(Message::SettingsDataDirChanged)
+                    .on_input(|v| Message::Settings(SettingsMsg::DataDirChanged(v)))
                     .size(13)
                     .padding([8, 10])
                     .style(input_style),
                 Space::new().width(8).height(8),
                 outline_btn_sm("Browse…")
-                    .on_press(Message::SettingsPickDataDir),
+                    .on_press(Message::Settings(SettingsMsg::PickDataDir)),
             ]
             .align_y(Alignment::Center),
-            Space::new(),
             row![
                 use_default_btn,
                 Space::new().width(Length::Fill),
@@ -102,7 +89,7 @@ fn wizard_data_folder(state: &EasyHarvest) -> Element<'_, Message> {
             ]
             .align_y(Alignment::Center),
         ]
-        .spacing(0),
+        .spacing(SECTION_GAP),
     )
     .style(card_style)
     .padding(18)
@@ -115,7 +102,7 @@ fn wizard_data_folder(state: &EasyHarvest) -> Element<'_, Message> {
 
 fn wizard_credentials(state: &EasyHarvest) -> Element<'_, Message> {
     let back_btn = outline_btn("←  Back")
-        .on_press(Message::WizardBack);
+        .on_press(Message::Settings(SettingsMsg::WizardBack));
 
     let card = container(
         column![
@@ -123,7 +110,6 @@ fn wizard_credentials(state: &EasyHarvest) -> Element<'_, Message> {
                 .font(FONT_SEMIBOLD)
                 .size(20)
                 .color(TEXT_PRIMARY),
-            Space::new(),
             text(
                 "Get your Personal Access Token and Account ID from \
                  harvestapp.com → Settings → Developers.",
@@ -131,25 +117,19 @@ fn wizard_credentials(state: &EasyHarvest) -> Element<'_, Message> {
             .font(FONT_REGULAR)
             .size(12)
             .color(TEXT_MUTED),
-            Space::new(),
             field_label("Personal Access Token"),
-            Space::new(),
             token_input(state),
-            Space::new(),
             field_label("Account ID"),
-            Space::new(),
             account_input(state),
-            Space::new(),
             row![
                 back_btn,
                 Space::new().width(Length::Fill),
                 connect_btn(state),
             ]
             .align_y(Alignment::Center),
-            Space::new(),
             connection_error(state),
         ]
-        .spacing(0),
+        .spacing(SECTION_GAP),
     )
     .style(card_style)
     .padding(18)
@@ -173,7 +153,7 @@ fn profile_section(state: &EasyHarvest) -> Element<'_, Message> {
 
     let save_row: Element<Message> = {
         let btn = primary_btn("Save")
-            .on_press(Message::SettingsSaveProfile);
+            .on_press(Message::Settings(SettingsMsg::SaveProfile));
 
         let feedback: Element<Message> = if state.settings_form.profile_saved {
             text("Saved!").font(FONT_MEDIUM).size(12).color(SUCCESS).into()
@@ -191,38 +171,32 @@ fn profile_section(state: &EasyHarvest) -> Element<'_, Message> {
     container(
         column![
             section_heading("Work Profile"),
-            Space::new(),
             numeric_row(
                 "Full-time weekly hours",
                 &state.settings_form.weekly_hours_input,
                 "41",
-                Message::SettingsWeeklyHoursChanged,
+                |v| Message::Settings(SettingsMsg::WeeklyHoursChanged(v)),
                 "h (100%)",
             ),
-            Space::new(),
             numeric_row(
                 "Work percentage",
                 &state.settings_form.percentage_input,
                 "100",
-                Message::SettingsPercentageChanged,
+                |v| Message::Settings(SettingsMsg::PercentageChanged(v)),
                 "%",
             ),
-            Space::new(),
             numeric_row(
                 "Vacation days / year",
                 &state.settings_form.holidays_input,
                 "25",
-                Message::SettingsHolidaysChanged,
+                |v| Message::Settings(SettingsMsg::HolidaysChanged(v)),
                 "days (100%)",
             ),
-            Space::new(),
             first_work_day_row(state),
-            Space::new(),
             summary,
-            Space::new(),
             save_row,
         ]
-        .spacing(0),
+        .spacing(SECTION_GAP),
     )
     .style(card_style)
     .padding(12)
@@ -243,7 +217,7 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
         .map(|(year, c)| {
             let year = *year;
 
-            let del_btn = super::delete_chip_btn(Message::SettingsCarryoverDelete(year));
+            let del_btn = super::delete_chip_btn(Message::Settings(SettingsMsg::CarryoverDelete(year)));
 
             // Year chip
             let year_chip = container(
@@ -304,7 +278,7 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
         text("No carryover entries yet.")
             .font(FONT_REGULAR).size(12).color(TEXT_MUTED).into()
     } else {
-        column(rows).spacing(4).into()
+        column(rows).spacing(LIST_ROW_SPACING).into()
     };
 
     // Add form — three labeled fields + button
@@ -318,56 +292,48 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
         // Year field
         column![
             caption("Year"),
-            Space::new(),
             text_input("e.g. 2026", &state.settings_form.carryover_year_input)
-                .on_input(Message::SettingsCarryoverYearChanged)
+                .on_input(|v| Message::Settings(SettingsMsg::CarryoverYearChanged(v)))
                 .size(13).padding([7, 8]).style(input_style).width(64),
         ]
-        .spacing(0),
+        .spacing(4),
         Space::new().width(8).height(8),
         // Holiday days field
         column![
             caption("Vacation days"),
-            Space::new(),
             text_input("0.0", &state.settings_form.carryover_holiday_input)
-                .on_input(Message::SettingsCarryoverHolidayChanged)
+                .on_input(|v| Message::Settings(SettingsMsg::CarryoverHolidayChanged(v)))
                 .size(13).padding([7, 8]).style(input_style).width(72),
         ]
-        .spacing(0),
+        .spacing(4),
         Space::new().width(8).height(8),
         // OT hours field
         column![
             caption("Overtime hours"),
-            Space::new(),
             text_input("0.0", &state.settings_form.carryover_overtime_input)
-                .on_input(Message::SettingsCarryoverOvertimeChanged)
+                .on_input(|v| Message::Settings(SettingsMsg::CarryoverOvertimeChanged(v)))
                 .size(13).padding([7, 8]).style(input_style).width(72),
         ]
-        .spacing(0),
+        .spacing(4),
         Space::new().width(12).height(12),
         // Add button aligned to bottom of fields
         column![
             Space::new(), // matches label + gap height
             primary_btn("+ Add")
-                .on_press(Message::SettingsCarryoverSave),
-        ]
-        .spacing(0),
+                .on_press(Message::Settings(SettingsMsg::CarryoverSave)),
+        ],
     ]
     .align_y(Alignment::End);
 
     container(
         column![
             section_heading("Carryover"),
-            Space::new(),
             caption("Balances brought over from the previous year."),
-            Space::new(),
             list,
-            Space::new(),
             add_form,
-            Space::new(),
             feedback,
         ]
-        .spacing(0),
+        .spacing(SECTION_GAP),
     )
     .style(card_style)
     .padding(12)
@@ -384,10 +350,10 @@ fn holidays_section(state: &EasyHarvest) -> Element<'_, Message> {
 
     let year_nav = row![
         nav_arrow_btn("‹")
-            .on_press(Message::HolidayViewYearPrev),
+            .on_press(Message::Settings(SettingsMsg::HolidayViewYearPrev)),
         text(year.to_string()).font(FONT_SEMIBOLD).size(13).color(TEXT_PRIMARY),
         nav_arrow_btn("›")
-            .on_press(Message::HolidayViewYearNext),
+            .on_press(Message::Settings(SettingsMsg::HolidayViewYearNext)),
     ]
     .align_y(Alignment::Center)
     .spacing(4);
@@ -432,12 +398,10 @@ fn holidays_section(state: &EasyHarvest) -> Element<'_, Message> {
                 year_nav,
             ]
             .align_y(Alignment::Center),
-            Space::new(),
             caption("Swiss public holidays — used for working day calculations. Read-only."),
-            Space::new(),
-            column(rows).spacing(4),
+            column(rows).spacing(LIST_ROW_SPACING),
         ]
-        .spacing(0),
+        .spacing(SECTION_GAP),
     )
     .style(card_style)
     .padding(12)
@@ -460,23 +424,19 @@ fn sync_section(state: &EasyHarvest) -> Element<'_, Message> {
     };
 
     let sync_btn = primary_btn("↻  Sync Assignments")
-        .on_press(Message::SyncAssignments);
+        .on_press(Message::Entry(Box::new(EntryMsg::SyncAssignments)));
 
     container(
-        column![
-            row![
-                column![
-                    section_heading("Project Assignments"),
-                    Space::new(),
-                    count_label,
-                ]
-                .spacing(0)
-                .width(Length::Fill),
-                sync_btn,
+        row![
+            column![
+                section_heading("Project Assignments"),
+                count_label,
             ]
-            .align_y(Alignment::Center),
+            .spacing(4)
+            .width(Length::Fill),
+            sync_btn,
         ]
-        .spacing(0),
+        .align_y(Alignment::Center),
     )
     .style(card_style)
     .padding(12)
@@ -489,13 +449,12 @@ fn holiday_tasks_section(state: &EasyHarvest) -> Element<'_, Message> {
         return container(
             column![
                 section_heading("Holiday Tasks"),
-                Space::new(),
                 text("No assignments loaded — use Sync Assignments above, or open the Day view first.")
                     .font(FONT_REGULAR)
                     .size(12)
                     .color(TEXT_MUTED),
             ]
-            .spacing(0),
+            .spacing(SECTION_GAP),
         )
         .style(card_style)
         .padding(12)
@@ -519,7 +478,7 @@ fn holiday_tasks_section(state: &EasyHarvest) -> Element<'_, Message> {
             container(
                 row![
                     text(name).font(FONT_MEDIUM).size(12).color(TEXT_PRIMARY).width(Length::Fill),
-                    delete_chip_btn(Message::HolidayTaskToggle(id)),
+                    delete_chip_btn(Message::Settings(SettingsMsg::HolidayTaskToggle(id))),
                 ]
                 .align_y(Alignment::Center),
             )
@@ -547,7 +506,7 @@ fn holiday_tasks_section(state: &EasyHarvest) -> Element<'_, Message> {
 
     // Search input
     let search_input = text_input("Search tasks to add…", &state.settings_form.holiday_task_query)
-        .on_input(Message::HolidayTaskQueryChanged)
+        .on_input(|v| Message::Settings(SettingsMsg::HolidayTaskQueryChanged(v)))
         .size(13)
         .padding([8, 10])
         .style(input_style);
@@ -573,7 +532,7 @@ fn holiday_tasks_section(state: &EasyHarvest) -> Element<'_, Message> {
                 .style(suggestion_btn_style)
                 .padding([8, 12])
                 .width(Length::Fill)
-                .on_press(Message::HolidayTaskToggle(task_id))
+                .on_press(Message::Settings(SettingsMsg::HolidayTaskToggle(task_id)))
                 .into()
             })
             .collect();
@@ -595,16 +554,12 @@ fn holiday_tasks_section(state: &EasyHarvest) -> Element<'_, Message> {
     container(
         column![
             section_heading("Holiday Tasks"),
-            Space::new(),
             caption("Tasks that count as vacation time in the Vacation tab and overtime balance."),
-            Space::new(),
             chips_el,
-            Space::new(),
             search_input,
-            Space::new(),
             suggestions_el,
         ]
-        .spacing(0),
+        .spacing(SECTION_GAP),
     )
     .style(card_style)
     .padding(12)
@@ -616,15 +571,15 @@ fn holiday_tasks_section(state: &EasyHarvest) -> Element<'_, Message> {
 
 fn data_dir_section(state: &EasyHarvest) -> Element<'_, Message> {
     let browse_btn = outline_btn_sm("Browse…")
-        .on_press(Message::SettingsPickDataDir);
+        .on_press(Message::Settings(SettingsMsg::PickDataDir));
 
     let save_row: Element<Message> = {
         let btn = primary_btn("Apply")
-            .on_press(Message::SettingsSaveDataDir);
+            .on_press(Message::Settings(SettingsMsg::SaveDataDir));
 
         let feedback: Element<Message> = if state.settings_form.data_dir_saved {
             text("Applied! Please restart the app for the change to take effect.")
-                .font(FONT_MEDIUM).size(11).color(SUCCESS).into()
+                .font(FONT_MEDIUM).size(12).color(SUCCESS).into()
         } else {
             Space::new().into()
         };
@@ -637,12 +592,10 @@ fn data_dir_section(state: &EasyHarvest) -> Element<'_, Message> {
     container(
         column![
             section_heading("Data Folder"),
-            Space::new(),
             caption("Your settings and local work-day records are stored here. Point this to a OneDrive or cloud folder to sync across devices."),
-            Space::new(),
             row![
                 text_input("Path…", &state.settings_form.data_dir_input)
-                    .on_input(Message::SettingsDataDirChanged)
+                    .on_input(|v| Message::Settings(SettingsMsg::DataDirChanged(v)))
                     .size(13)
                     .padding([8, 10])
                     .style(input_style),
@@ -650,10 +603,9 @@ fn data_dir_section(state: &EasyHarvest) -> Element<'_, Message> {
                 browse_btn,
             ]
             .align_y(Alignment::Center),
-            Space::new(),
             save_row,
         ]
-        .spacing(0),
+        .spacing(SECTION_GAP),
     )
     .style(card_style)
     .padding(12)
@@ -676,7 +628,7 @@ fn startup_section(state: &EasyHarvest) -> Element<'_, Message> {
             if enabled { toggle_active_style(6.0) } else { toggle_inactive_style(6.0) }
         })
         .padding([5, 14])
-        .on_press(Message::SettingsAutostartToggle);
+        .on_press(Message::Settings(SettingsMsg::AutostartToggle));
 
     let row_content = row![
         column![
@@ -713,7 +665,7 @@ fn connection_section(state: &EasyHarvest) -> Element<'_, Message> {
             )
             .style(outline_btn_style)
             .padding([5, 12])
-            .on_press(Message::Disconnect),
+            .on_press(Message::Settings(SettingsMsg::Disconnect)),
         ]
         .align_y(Alignment::Center)
         .into()
@@ -724,22 +676,15 @@ fn connection_section(state: &EasyHarvest) -> Element<'_, Message> {
     container(
         column![
             section_heading("Connection"),
-            Space::new(),
             status_row,
-            Space::new(),
             field_label("Personal Access Token"),
-            Space::new(),
             token_input(state),
-            Space::new(),
             field_label("Account ID"),
-            Space::new(),
             account_input(state),
-            Space::new(),
             connect_btn(state),
-            Space::new(),
             connection_error(state),
         ]
-        .spacing(0),
+        .spacing(SECTION_GAP),
     )
     .style(card_style)
     .padding(12)
@@ -751,7 +696,7 @@ fn connection_section(state: &EasyHarvest) -> Element<'_, Message> {
 
 fn token_input(state: &EasyHarvest) -> Element<'_, Message> {
     text_input("Paste your token here…", &state.settings_form.token_input)
-        .on_input(Message::SettingsTokenChanged)
+        .on_input(|v| Message::Settings(SettingsMsg::TokenChanged(v)))
         .secure(true)
         .size(13)
         .padding([8, 10])
@@ -761,7 +706,7 @@ fn token_input(state: &EasyHarvest) -> Element<'_, Message> {
 
 fn account_input(state: &EasyHarvest) -> Element<'_, Message> {
     text_input("e.g. 123456", &state.settings_form.account_input)
-        .on_input(Message::SettingsAccountIdChanged)
+        .on_input(|v| Message::Settings(SettingsMsg::AccountIdChanged(v)))
         .size(13)
         .padding([8, 10])
         .style(input_style)
@@ -773,7 +718,7 @@ fn connect_btn(state: &EasyHarvest) -> Element<'_, Message> {
     let b = primary_btn(label)
         .width(Length::Fill);
 
-    if state.settings_form.connecting { b.into() } else { b.on_press(Message::SettingsSave).into() }
+    if state.settings_form.connecting { b.into() } else { b.on_press(Message::Settings(SettingsMsg::Save)).into() }
 }
 
 fn connection_error(state: &EasyHarvest) -> Element<'_, Message> {
@@ -826,18 +771,18 @@ fn first_work_day_row(state: &EasyHarvest) -> Element<'_, Message> {
                 .color(TEXT_MUTED),
             text("Optional — adjusts your vacation days for your first year if you did not start on January 1st.")
                 .font(FONT_REGULAR)
-                .size(10)
+                .size(11)
                 .color(TEXT_MUTED),
         ]
         .spacing(1)
         .width(Length::Fill),
         text_input("DD.MM.YYYY", &state.settings_form.first_work_day_input)
-            .on_input(Message::SettingsFirstWorkDayChanged)
+            .on_input(|v| Message::Settings(SettingsMsg::FirstWorkDayChanged(v)))
             .size(13)
             .padding([7, 8])
             .style(input_style)
             .width(100),
-        Space::new().width(92).height(92), // aligns with the unit label in numeric_row (8px gap + 84px unit)
+        Space::new().width(92), // aligns with the unit label in numeric_row (8px gap + 84px unit)
     ]
     .align_y(Alignment::Center)
     .into()
@@ -873,7 +818,7 @@ fn template_add_form(state: &EasyHarvest) -> Element<'_, Message> {
                 .style(super::suggestion_btn_style)
                 .padding([8, 12])
                 .width(Length::Fill)
-                .on_press(Message::SettingsTemplateAddProjectSelected(idx))
+                .on_press(Message::Settings(SettingsMsg::TemplateAddProjectSelected(idx)))
                 .into()
             })
             .collect();
@@ -893,48 +838,38 @@ fn template_add_form(state: &EasyHarvest) -> Element<'_, Message> {
     };
 
     let save_btn = primary_btn("Save Template")
-        .on_press(Message::SettingsTemplateAddSave);
+        .on_press(Message::Settings(SettingsMsg::TemplateAddSave));
 
     column![
-        Space::new(),
         field_label("Name"),
-        Space::new(),
         text_input("e.g. Travel Luzern-Olten", &state.template_form.label)
-            .on_input(Message::SettingsTemplateAddLabelChanged)
+            .on_input(|v| Message::Settings(SettingsMsg::TemplateAddLabelChanged(v)))
             .size(13)
             .padding([8, 10])
             .style(input_style),
-        Space::new(),
         field_label("Project & Task"),
-        Space::new(),
         text_input("Search…", &state.template_form.project_query)
-            .on_input(Message::SettingsTemplateAddProjectQueryChanged)
+            .on_input(|v| Message::Settings(SettingsMsg::TemplateAddProjectQueryChanged(v)))
             .size(13)
             .padding([8, 10])
             .style(input_style),
         project_suggestions,
-        Space::new(),
         field_label("Default hours (optional)"),
-        Space::new(),
         text_input("e.g. 1:30", &state.template_form.hours)
-            .on_input(Message::SettingsTemplateAddHoursChanged)
+            .on_input(|v| Message::Settings(SettingsMsg::TemplateAddHoursChanged(v)))
             .size(13)
             .padding([8, 10])
             .style(input_style),
-        Space::new(),
         field_label("Notes (optional)"),
-        Space::new(),
         text_input("Pre-filled notes…", &state.template_form.notes)
-            .on_input(Message::SettingsTemplateAddNotesChanged)
+            .on_input(|v| Message::Settings(SettingsMsg::TemplateAddNotesChanged(v)))
             .size(13)
             .padding([8, 10])
             .style(input_style),
-        Space::new(),
         error,
-        Space::new(),
         save_btn,
     ]
-    .spacing(0)
+    .spacing(6)
     .into()
 }
 
@@ -950,7 +885,7 @@ fn templates_section(state: &EasyHarvest) -> Element<'_, Message> {
                 ..Default::default()
             })
             .padding([4, 8])
-            .on_press(Message::SettingsTemplateAddCancel)
+            .on_press(Message::Settings(SettingsMsg::TemplateAddCancel))
             .into()
     } else {
         button(text("+ Add").font(FONT_MEDIUM).size(12).color(ACCENT))
@@ -968,7 +903,7 @@ fn templates_section(state: &EasyHarvest) -> Element<'_, Message> {
                 ..Default::default()
             })
             .padding([4, 10])
-            .on_press(Message::SettingsTemplateAddOpen)
+            .on_press(Message::Settings(SettingsMsg::TemplateAddOpen))
             .into()
     };
 
@@ -1012,7 +947,7 @@ fn templates_section(state: &EasyHarvest) -> Element<'_, Message> {
                 Space::new().into()
             };
 
-            let del_btn = super::delete_chip_btn(Message::SettingsTemplateDelete(idx));
+            let del_btn = super::delete_chip_btn(Message::Settings(SettingsMsg::TemplateDelete(idx)));
 
             row![
                 column![
@@ -1047,14 +982,16 @@ fn templates_section(state: &EasyHarvest) -> Element<'_, Message> {
         Space::new().into()
     };
 
-    let mut col = column![heading_row, Space::new(), empty_hint]
-        .spacing(4);
-    for row_el in template_rows {
-        col = col.push(row_el);
-    }
-    col = col.push(add_form);
+    let template_list: Element<Message> = if template_rows.is_empty() {
+        Space::new().into()
+    } else {
+        column(template_rows).spacing(LIST_ROW_SPACING).into()
+    };
 
-    container(col.spacing(0))
+    container(
+        column![heading_row, empty_hint, template_list, add_form]
+            .spacing(SECTION_GAP),
+    )
         .style(card_style)
         .padding(12)
         .width(Length::Fill)

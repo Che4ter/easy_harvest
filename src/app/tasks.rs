@@ -16,7 +16,7 @@ impl EasyHarvest {
                     .await
                     .map_err(|e| e.to_string())
             },
-            move |result| Message::EntriesLoaded(gen, result),
+            move |result| Message::Entry(Box::new(EntryMsg::Loaded(gen, result))),
         )
     }
 
@@ -41,7 +41,7 @@ impl EasyHarvest {
                 let _ = ProjectCache::new(assignments.clone()).save(&data_dir);
                 Ok(assignments)
             },
-            Message::AssignmentsLoaded,
+            |result| Message::Entry(Box::new(EntryMsg::AssignmentsLoaded(result))),
         )
     }
 
@@ -104,7 +104,7 @@ impl EasyHarvest {
                 );
                 Ok((balance, holidays))
             },
-            move |result| Message::StatsLoaded(gen, result),
+            move |result| Message::Stats(StatsMsg::Loaded(gen, result)),
         )
     }
 
@@ -123,7 +123,7 @@ impl EasyHarvest {
                     .await
                     .map_err(|e| e.to_string())
             },
-            move |result| Message::VacationEntriesLoaded(gen, result),
+            move |result| Message::Vacation(VacationMsg::EntriesLoaded(gen, result)),
         )
     }
 
@@ -154,7 +154,7 @@ impl EasyHarvest {
                     .await
                     .map_err(|e| e.to_string())
             },
-            move |result| Message::BillableEntriesLoaded(gen, result),
+            move |result| Message::Billable(BillableMsg::EntriesLoaded(gen, result)),
         )
     }
 
@@ -176,7 +176,7 @@ impl EasyHarvest {
                 }
                 Ok(created)
             },
-            Message::VacationEntriesCreated,
+            |result| Message::Vacation(VacationMsg::EntriesCreated(result)),
         )
     }
 

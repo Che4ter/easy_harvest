@@ -1,6 +1,36 @@
 use super::*;
 
-// ── Work Day ─────────────────────────────────────────────────────────────────
+// ── Work Day edit state ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct WorkDayEditState {
+    pub edit_mode: bool,
+    pub start_input: String,
+    pub end_input: String,
+    /// (break_start_str, break_end_str) per break in edit mode
+    pub break_inputs: Vec<(String, String)>,
+}
+
+// ── Work Day messages ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum WorkDayMsg {
+    Start,
+    StartBreak,
+    EndBreak,
+    End,
+    Resume,
+    Tick,
+    EditStart,
+    EditCancel,
+    StartInputChanged(String),
+    EndInputChanged(String),
+    BreakStartChanged(usize, String),
+    BreakEndChanged(usize, String),
+    BreakDelete(usize),
+    BreakAdd,
+    EditSave,
+}
 
 impl EasyHarvest {
     /// Save the work day store and surface any error via the error banner.
@@ -10,9 +40,9 @@ impl EasyHarvest {
         }
     }
 
-    pub(super) fn update_work_day(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::StartDay => {
+    pub(super) fn update_work_day(&mut self, msg: WorkDayMsg) -> Task<Message> {
+        match msg {
+            WorkDayMsg::Start => {
                 let now = Local::now().naive_local();
                 let mut day = self.work_day_store.get_or_default(now.date());
                 day.start(now.time());
@@ -23,7 +53,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::StartBreak => {
+            WorkDayMsg::StartBreak => {
                 let now = Local::now().naive_local();
                 let mut day = self.work_day_store.get_or_default(now.date());
                 day.start_break(now.time());
@@ -34,7 +64,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::EndBreak => {
+            WorkDayMsg::EndBreak => {
                 let now = Local::now().naive_local();
                 let mut day = self.work_day_store.get_or_default(now.date());
                 day.end_break(now.time());
@@ -45,7 +75,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::EndDay => {
+            WorkDayMsg::End => {
                 let now = Local::now().naive_local();
                 let mut day = self.work_day_store.get_or_default(now.date());
                 day.end(now.time());
@@ -56,7 +86,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::ResumeDay => {
+            WorkDayMsg::Resume => {
                 let now = Local::now().naive_local();
                 let mut day = self.work_day_store.get_or_default(now.date());
                 // Record the "off" gap as a break so worked hours stay accurate.
@@ -74,13 +104,13 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::WorkDayTick => {
+            WorkDayMsg::Tick => {
                 #[cfg(not(target_os = "macos"))]
                 self.sync_tray_phase();
                 Task::none()
             }
 
-            Message::WorkDayEditStart => {
+            WorkDayMsg::EditStart => {
                 let day = self.work_day_store.get_or_default(self.current_date);
                 self.work_day_edit.start_input = day.start_time
                     .map(|t| t.format("%H:%M").to_string())
@@ -96,49 +126,49 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::WorkDayEditCancel => {
+            WorkDayMsg::EditCancel => {
                 self.work_day_edit.edit_mode = false;
                 self.work_day_edit.break_inputs.clear();
                 Task::none()
             }
 
-            Message::WorkDayStartInputChanged(v) => {
+            WorkDayMsg::StartInputChanged(v) => {
                 self.work_day_edit.start_input = v;
                 Task::none()
             }
 
-            Message::WorkDayEndInputChanged(v) => {
+            WorkDayMsg::EndInputChanged(v) => {
                 self.work_day_edit.end_input = v;
                 Task::none()
             }
 
-            Message::WorkDayBreakStartChanged(idx, v) => {
+            WorkDayMsg::BreakStartChanged(idx, v) => {
                 if let Some(b) = self.work_day_edit.break_inputs.get_mut(idx) {
                     b.0 = v;
                 }
                 Task::none()
             }
 
-            Message::WorkDayBreakEndChanged(idx, v) => {
+            WorkDayMsg::BreakEndChanged(idx, v) => {
                 if let Some(b) = self.work_day_edit.break_inputs.get_mut(idx) {
                     b.1 = v;
                 }
                 Task::none()
             }
 
-            Message::WorkDayBreakDelete(idx) => {
+            WorkDayMsg::BreakDelete(idx) => {
                 if idx < self.work_day_edit.break_inputs.len() {
                     self.work_day_edit.break_inputs.remove(idx);
                 }
                 Task::none()
             }
 
-            Message::WorkDayBreakAdd => {
+            WorkDayMsg::BreakAdd => {
                 self.work_day_edit.break_inputs.push((String::new(), String::new()));
                 Task::none()
             }
 
-            Message::WorkDayEditSave => {
+            WorkDayMsg::EditSave => {
                 use chrono::NaiveTime;
                 let mut day = self.work_day_store.get_or_default(self.current_date);
                 let mut errors: Vec<&str> = Vec::new();
@@ -199,8 +229,6 @@ impl EasyHarvest {
                 self.sync_tray_phase();
                 Task::none()
             }
-
-            _ => unreachable!(),
         }
     }
 }

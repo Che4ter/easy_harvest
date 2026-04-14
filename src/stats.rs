@@ -1,7 +1,6 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
-use chrono::{Datelike, Duration, IsoWeek, NaiveDate};
-use serde::{Deserialize, Serialize};
+use chrono::{Datelike, Duration, NaiveDate};
 
 use crate::harvest::models::TimeEntry;
 use crate::state::settings::PublicHoliday;
@@ -244,71 +243,6 @@ pub fn year_bounds(year: i32) -> (NaiveDate, NaiveDate) {
 
 fn parse_date(s: &str) -> Result<NaiveDate, chrono::ParseError> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d")
-}
-
-// ---------------------------------------------------------------------------
-// Locked-week cache
-// ---------------------------------------------------------------------------
-
-/// Accumulates totals for fully-locked (submitted/approved) ISO weeks so they
-/// never need to be re-fetched from the API.
-///
-/// Persisted as `<data_dir>/stats_cache/locked_totals.json`.
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct LockedCache {
-    /// "YYYY-WW" → total hours for that week.
-    weeks: HashMap<String, f64>,
-}
-
-impl LockedCache {
-    fn key(iso: IsoWeek) -> String {
-        format!("{}-{:02}", iso.year(), iso.week())
-    }
-
-    /// Inspect `entries` and cache any week where every entry is locked.
-    /// Already-cached weeks are left unchanged (keeps historical totals stable).
-    pub fn cache_locked_weeks(&mut self, entries: &[TimeEntry]) {
-        let mut by_week: HashMap<String, Vec<&TimeEntry>> = HashMap::new();
-        for e in entries {
-            if let Ok(date) = parse_date(&e.spent_date) {
-                by_week.entry(Self::key(date.iso_week())).or_default().push(e);
-            }
-        }
-        for (key, week_entries) in by_week {
-            if !self.weeks.contains_key(&key) && week_entries.iter().all(|e| e.is_locked) {
-                let total: f64 = week_entries.iter().map(|e| e.hours).sum();
-                self.weeks.insert(key, total);
-            }
-        }
-    }
-
-    pub fn is_week_cached(&self, date: NaiveDate) -> bool {
-        self.weeks.contains_key(&Self::key(date.iso_week()))
-    }
-
-    pub fn get_week_hours(&self, date: NaiveDate) -> Option<f64> {
-        self.weeks.get(&Self::key(date.iso_week())).copied()
-    }
-
-    pub fn total_cached_hours(&self) -> f64 {
-        self.weeks.values().sum()
-    }
-
-    pub fn load(data_dir: &std::path::Path) -> Self {
-        let path = data_dir.join("stats_cache").join("locked_totals.json");
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    }
-
-    pub fn save(&self, data_dir: &std::path::Path) -> Result<(), std::io::Error> {
-        let dir = data_dir.join("stats_cache");
-        std::fs::create_dir_all(&dir)?;
-        let json = serde_json::to_string_pretty(self)
-            .map_err(std::io::Error::other)?;
-        std::fs::write(dir.join("locked_totals.json"), json)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -742,62 +676,4 @@ mod tests {
         assert_eq!(end, NaiveDate::from_ymd_opt(2025, 12, 31).unwrap());
     }
 
-    // --- LockedCache ---
-
-    #[test]
-    fn test_locked_cache_only_caches_fully_locked_weeks() {
-        let entries = vec![
-            entry("2025-01-06", 8.0, 1, true),  // locked
-            entry("2025-01-07", 8.0, 1, true),  // locked
-            entry("2025-01-08", 8.0, 1, false), // NOT locked — week should not be cached
-            entry("2025-01-13", 8.0, 1, true),  // next week, locked
-            entry("2025-01-14", 6.0, 1, true),  // next week, locked
-        ];
-        let mut cache = LockedCache::default();
-        cache.cache_locked_weeks(&entries);
-
-        let week1 = NaiveDate::from_ymd_opt(2025, 1, 6).unwrap();
-        let week2 = NaiveDate::from_ymd_opt(2025, 1, 13).unwrap();
-
-        assert!(!cache.is_week_cached(week1), "partial week should not be cached");
-        assert!(cache.is_week_cached(week2), "fully locked week should be cached");
-        assert_eq!(cache.get_week_hours(week2), Some(14.0));
-        assert_eq!(cache.total_cached_hours(), 14.0);
-    }
-
-    #[test]
-    fn test_locked_cache_does_not_overwrite_existing() {
-        let entries_week1 = vec![
-            entry("2025-01-13", 8.0, 1, true),
-            entry("2025-01-14", 8.0, 1, true),
-        ];
-        let mut cache = LockedCache::default();
-        cache.cache_locked_weeks(&entries_week1);
-        assert_eq!(cache.get_week_hours(NaiveDate::from_ymd_opt(2025, 1, 13).unwrap()), Some(16.0));
-
-        // Second call with different hours — should not overwrite
-        let entries_week1_v2 = vec![entry("2025-01-13", 99.0, 1, true)];
-        cache.cache_locked_weeks(&entries_week1_v2);
-        assert_eq!(
-            cache.get_week_hours(NaiveDate::from_ymd_opt(2025, 1, 13).unwrap()),
-            Some(16.0),
-            "cached value should not be overwritten"
-        );
-    }
-
-    #[test]
-    fn test_locked_cache_save_load() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut cache = LockedCache::default();
-        let entries = vec![
-            entry("2025-01-13", 7.5, 1, true),
-            entry("2025-01-14", 8.0, 1, true),
-        ];
-        cache.cache_locked_weeks(&entries);
-        cache.save(dir.path()).expect("save failed");
-
-        let loaded = LockedCache::load(dir.path());
-        let date = NaiveDate::from_ymd_opt(2025, 1, 13).unwrap();
-        assert_eq!(loaded.get_week_hours(date), Some(15.5));
-    }
 }

@@ -259,11 +259,11 @@ impl subscription::Recipe for TrayRecipe {
                             if let Ok(action) = action_rx.try_recv() {
                                 let msg = match action {
                                     TrayAction::ToggleWindow => Message::TrayToggle,
-                                    TrayAction::StartDay => Message::StartDay,
-                                    TrayAction::StartBreak => Message::StartBreak,
-                                    TrayAction::EndBreak => Message::EndBreak,
-                                    TrayAction::EndDay => Message::EndDay,
-                                    TrayAction::ResumeDay => Message::ResumeDay,
+                                    TrayAction::StartDay => Message::WorkDay(crate::app::WorkDayMsg::Start),
+                                    TrayAction::StartBreak => Message::WorkDay(crate::app::WorkDayMsg::StartBreak),
+                                    TrayAction::EndBreak => Message::WorkDay(crate::app::WorkDayMsg::EndBreak),
+                                    TrayAction::EndDay => Message::WorkDay(crate::app::WorkDayMsg::End),
+                                    TrayAction::ResumeDay => Message::WorkDay(crate::app::WorkDayMsg::Resume),
                                     TrayAction::Quit => Message::QuitApp,
                                 };
                                 return Some((msg, TrayState::Active { action_rx, cmd_tx, notify, phase }));

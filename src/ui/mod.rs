@@ -5,9 +5,18 @@ pub mod stats_view;
 pub mod vacation_view;
 
 use iced::widget::{button, column, container, row, text, text_input, Space};
-use iced::{Alignment, Border, Color, Element, Length};
+use iced::{Alignment, Border, Color, Element, Length, Padding};
 
 use crate::app::{Message, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD, SURFACE_HOVER, SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY};
+
+// ── Layout constants ────────────────────────────────────────────────────────
+
+/// Standard page padding: 12px on top/left/right, 0 on bottom (scrollable handles bottom).
+pub const PAGE_PADDING: Padding = Padding { top: 12.0, right: 12.0, bottom: 0.0, left: 12.0 };
+/// Standard section gap between major content blocks.
+pub const SECTION_GAP: f32 = 12.0;
+/// Standard gap between list rows.
+pub const LIST_ROW_SPACING: f32 = 4.0;
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -84,7 +93,7 @@ pub fn field_label(label: &str) -> Element<'_, Message> {
 }
 
 pub fn caption(content: impl std::fmt::Display) -> iced::widget::Text<'static> {
-    text(content.to_string()).font(FONT_REGULAR).size(11).color(TEXT_MUTED)
+    text(content.to_string()).font(FONT_REGULAR).size(12).color(TEXT_MUTED)
 }
 
 /// Standard `SURFACE_RAISED` container background with the given corner radius.
@@ -367,13 +376,6 @@ pub fn outline_btn_sm(label: &str) -> button::Button<'_, Message> {
         .padding([8, 12])
 }
 
-/// Suggestion dropdown item — FONT_REGULAR 13, TEXT_PRIMARY, padding [8, 12].
-pub fn suggestion_item(label: &str) -> button::Button<'_, Message> {
-    button(text(label).font(FONT_REGULAR).size(13).color(TEXT_PRIMARY))
-        .style(suggestion_btn_style)
-        .padding([8, 12])
-}
-
 /// Section heading — FONT_SEMIBOLD 14, TEXT_PRIMARY.
 pub fn section_heading(title: &str) -> Element<'_, Message> {
     text(title).font(FONT_SEMIBOLD).size(14).color(TEXT_PRIMARY).into()
@@ -435,7 +437,7 @@ pub fn stat_chip<'a>(
     container(
         column![
             text(value).font(FONT_SEMIBOLD).size(20).color(color),
-            text(subtitle).font(FONT_REGULAR).size(11).color(color),
+            text(subtitle).font(FONT_REGULAR).size(12).color(color),
             caption(label),
         ]
         .spacing(2)

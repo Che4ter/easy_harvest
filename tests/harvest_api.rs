@@ -234,14 +234,6 @@ async fn test_stats_current_month() {
     for day in &daily {
         println!("  {} {:.2}h ({} entries)", day.date, day.total_hours, day.entry_count);
     }
-
-    // Locked cache smoke test
-    let mut cache = stats::LockedCache::default();
-    cache.cache_locked_weeks(&entries);
-    println!(
-        "\nLocked cache: {:.2}h across cached weeks",
-        cache.total_cached_hours()
-    );
 }
 
 #[tokio::test]

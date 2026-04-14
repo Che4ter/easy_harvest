@@ -1,11 +1,93 @@
 use super::*;
 
+// ── Entry form ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct EntryForm {
+    /// None = create new; Some(id) = editing existing
+    pub editing_id: Option<i64>,
+    pub project_query: String,
+    pub selected_project_idx: Option<usize>,
+    pub hours_input: String,
+    pub notes_input: String,
+    pub error: Option<String>,
+}
+
+impl EntryForm {
+    pub fn new() -> Self {
+        Self {
+            editing_id: None,
+            project_query: String::new(),
+            selected_project_idx: None,
+            hours_input: String::new(),
+            notes_input: String::new(),
+            error: None,
+        }
+    }
+
+    pub fn for_entry(entry: &TimeEntry, options: &[crate::state::favorites::ProjectOption]) -> Self {
+        let display = format!(
+            "{} > {} — {}",
+            entry.client.name, entry.project.name, entry.task.name
+        );
+        let idx = options.iter().position(|o| {
+            o.project_id == entry.project.id && o.task_id == entry.task.id
+        });
+        Self {
+            editing_id: Some(entry.id),
+            project_query: if let Some(i) = idx {
+                options[i].search_text.clone()
+            } else {
+                display
+            },
+            selected_project_idx: idx,
+            hours_input: format!("{:.2}", entry.hours),
+            notes_input: entry.notes.clone().unwrap_or_default(),
+            error: None,
+        }
+    }
+}
+
+impl Default for EntryForm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── Entries / Timer ──────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone)]
+pub enum EntryMsg {
+    Loaded(u64, Result<Vec<TimeEntry>, String>),
+    AssignmentsLoaded(Result<Vec<ProjectAssignment>, String>),
+    SyncAssignments,
+    ShowForm,
+    Edit(i64),
+    CancelForm,
+    ProjectQueryChanged(String),
+    ProjectSelected(usize),
+    HoursChanged(String),
+    NotesChanged(String),
+    FocusHours,
+    FocusNotes,
+    Submit,
+    Created(Result<TimeEntry, String>),
+    Updated(Result<TimeEntry, String>),
+    DeleteRequest(i64),
+    DeleteCancel,
+    Delete(i64),
+    Deleted(Result<i64, String>),
+    TimerStart(i64),
+    TimerStop(i64),
+    TimerStarted(Result<TimeEntry, String>),
+    TimerStopped(Result<TimeEntry, String>),
+    TemplateApply(usize),
+}
+
 impl EasyHarvest {
-    pub(super) fn update_entries(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::EntriesLoaded(gen, result) => {
+    pub(super) fn update_entries(&mut self, msg: EntryMsg) -> Task<Message> {
+        match msg {
+            EntryMsg::Loaded(gen, result) => {
                 if gen != self.entries_gen { return Task::none(); }
                 self.loading = false;
                 self.pending_delete = None;
@@ -16,7 +98,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::AssignmentsLoaded(result) => {
+            EntryMsg::AssignmentsLoaded(result) => {
                 match result {
                     Ok(assignments) => {
                         self.assignments = assignments;
@@ -28,39 +110,26 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::SyncAssignments => self.load_assignments_task(),
+            EntryMsg::SyncAssignments => self.load_assignments_task(),
 
-            Message::StatsLoaded(gen, result) => {
-                if gen != self.stats_gen { return Task::none(); }
-                self.loading = false;
-                match result {
-                    Ok((balance, holidays)) => {
-                        self.year_balance = Some(balance);
-                        self.holiday_stats = Some(holidays);
-                    }
-                    Err(e) => self.error_banner = Some(e),
-                }
-                Task::none()
-            }
-
-            Message::ShowAddForm => {
+            EntryMsg::ShowForm => {
                 self.entry_form = Some(EntryForm::new());
                 Task::none()
             }
 
-            Message::EditEntry(id) => {
+            EntryMsg::Edit(id) => {
                 if let Some(entry) = self.entries.iter().find(|e| e.id == id) {
-                    self.entry_form = Some(EntryForm::for_entry(entry));
+                    self.entry_form = Some(EntryForm::for_entry(entry, &self.cached_project_options));
                 }
                 Task::none()
             }
 
-            Message::CancelForm => {
+            EntryMsg::CancelForm => {
                 self.entry_form = None;
                 Task::none()
             }
 
-            Message::FormProjectQueryChanged(q) => {
+            EntryMsg::ProjectQueryChanged(q) => {
                 if let Some(form) = &mut self.entry_form {
                     form.project_query = q;
                     form.selected_project_idx = None;
@@ -68,7 +137,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::FormProjectSelected(idx) => {
+            EntryMsg::ProjectSelected(idx) => {
                 if let Some(form) = &mut self.entry_form {
                     let options = self.cached_project_options.clone();
                     if let Some(opt) = options.get(idx) {
@@ -79,29 +148,29 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::FormHoursChanged(h) => {
+            EntryMsg::HoursChanged(h) => {
                 if let Some(form) = &mut self.entry_form {
                     form.hours_input = h;
                 }
                 Task::none()
             }
 
-            Message::FormNotesChanged(n) => {
+            EntryMsg::NotesChanged(n) => {
                 if let Some(form) = &mut self.entry_form {
                     form.notes_input = n;
                 }
                 Task::none()
             }
 
-            Message::FormFocusHours => {
+            EntryMsg::FocusHours => {
                 iced::widget::operation::focus(iced::widget::Id::new("form_hours"))
             }
 
-            Message::FormFocusNotes => {
+            EntryMsg::FocusNotes => {
                 iced::widget::operation::focus(iced::widget::Id::new("form_notes"))
             }
 
-            Message::FormSubmit => {
+            EntryMsg::Submit => {
                 let Some(form) = &self.entry_form else {
                     return Task::none();
                 };
@@ -144,7 +213,9 @@ impl EasyHarvest {
 
                 // Record usage in favorites
                 self.favorites.record_use(opt.project_id, opt.task_id);
-                let _ = self.favorites.save(&self.settings.data_dir);
+                if let Err(e) = self.favorites.save(&self.settings.data_dir) {
+                    self.error_banner = Some(format!("Failed to save favorites: {e}"));
+                }
                 self.recompute_project_options();
 
                 if let Some(edit_id) = editing_id {
@@ -162,7 +233,7 @@ impl EasyHarvest {
                                 .await
                                 .map_err(|e| e.to_string())
                         },
-                        Message::EntryUpdated,
+                        |result| Message::Entry(Box::new(EntryMsg::Updated(result))),
                     )
                 } else {
                     let create = CreateTimeEntry {
@@ -179,12 +250,12 @@ impl EasyHarvest {
                                 .await
                                 .map_err(|e| e.to_string())
                         },
-                        Message::EntryCreated,
+                        |result| Message::Entry(Box::new(EntryMsg::Created(result))),
                     )
                 }
             }
 
-            Message::EntryCreated(result) => {
+            EntryMsg::Created(result) => {
                 match result {
                     Ok(entry) => {
                         self.entries.push(entry);
@@ -199,7 +270,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::EntryUpdated(result) => {
+            EntryMsg::Updated(result) => {
                 match result {
                     Ok(updated) => {
                         if let Some(pos) =
@@ -218,17 +289,17 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::DeleteRequest(id) => {
+            EntryMsg::DeleteRequest(id) => {
                 self.pending_delete = Some(id);
                 Task::none()
             }
 
-            Message::DeleteCancel => {
+            EntryMsg::DeleteCancel => {
                 self.pending_delete = None;
                 Task::none()
             }
 
-            Message::DeleteEntry(id) => {
+            EntryMsg::Delete(id) => {
                 self.pending_delete = None;
                 let Some(client) = self.client.clone() else {
                     return Task::none();
@@ -241,11 +312,11 @@ impl EasyHarvest {
                             .map(|_| id)
                             .map_err(|e| e.to_string())
                     },
-                    Message::EntryDeleted,
+                    |result| Message::Entry(Box::new(EntryMsg::Deleted(result))),
                 )
             }
 
-            Message::EntryDeleted(result) => {
+            EntryMsg::Deleted(result) => {
                 match result {
                     Ok(id) => self.entries.retain(|e| e.id != id),
                     Err(e) => self.error_banner = Some(e),
@@ -253,27 +324,27 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::TimerStart(id) => {
+            EntryMsg::TimerStart(id) => {
                 let Some(client) = self.client.clone() else {
                     return Task::none();
                 };
                 Task::perform(
                     async move { client.restart_timer(id).await.map_err(|e| e.to_string()) },
-                    Message::TimerStarted,
+                    |result| Message::Entry(Box::new(EntryMsg::TimerStarted(result))),
                 )
             }
 
-            Message::TimerStop(id) => {
+            EntryMsg::TimerStop(id) => {
                 let Some(client) = self.client.clone() else {
                     return Task::none();
                 };
                 Task::perform(
                     async move { client.stop_timer(id).await.map_err(|e| e.to_string()) },
-                    Message::TimerStopped,
+                    |result| Message::Entry(Box::new(EntryMsg::TimerStopped(result))),
                 )
             }
 
-            Message::TimerStarted(result) => {
+            EntryMsg::TimerStarted(result) => {
                 match result {
                     Ok(updated) => {
                         if let Some(e) = self.entries.iter_mut().find(|e| e.id == updated.id) {
@@ -285,7 +356,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::TimerStopped(result) => {
+            EntryMsg::TimerStopped(result) => {
                 match result {
                     Ok(updated) => {
                         if let Some(e) = self.entries.iter_mut().find(|e| e.id == updated.id) {
@@ -297,7 +368,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::TemplateApply(idx) => {
+            EntryMsg::TemplateApply(idx) => {
                 let Some(tpl) = self.templates.entries.get(idx).cloned() else {
                     return Task::none();
                 };
@@ -316,8 +387,6 @@ impl EasyHarvest {
                 form.notes_input = tpl.notes.clone();
                 Task::none()
             }
-
-            _ => unreachable!(),
         }
     }
 }

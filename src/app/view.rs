@@ -67,7 +67,7 @@ fn nav_bar(current: &Page) -> Element<'static, Message> {
         )
         .style(move |_, _| style)
         .padding([6, 14])
-        .on_press(Message::PageChanged(page))
+        .on_press(Message::Nav(NavMsg::PageChanged(page)))
     };
 
     let settings_active = *current == Page::Settings;
@@ -92,7 +92,7 @@ fn nav_bar(current: &Page) -> Element<'static, Message> {
         }
     })
     .padding([6, 12])
-    .on_press(Message::PageChanged(Page::Settings));
+    .on_press(Message::Nav(NavMsg::PageChanged(Page::Settings)));
 
     container(
         row![

@@ -1,129 +1,58 @@
 use super::*;
 
+// ── Date picker state ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct DatePickerState {
+    pub open: bool,
+    pub month: NaiveDate,
+}
+
+impl DatePickerState {
+    pub fn new(month: NaiveDate) -> Self {
+        Self { open: false, month }
+    }
+}
+
+// ── NavMsg ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum NavMsg {
+    PageChanged(Page),
+    DatePrev,
+    DateNext,
+    DateToday,
+    DatePickerToggle,
+    DatePickerMonthPrev,
+    DatePickerMonthNext,
+    DatePickerSelect(NaiveDate),
+}
+
 // ── Update ────────────────────────────────────────────────────────────────────
 
 impl EasyHarvest {
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             // ── Navigation / Date ──
-            Message::PageChanged(_)
-            | Message::DatePrev
-            | Message::DateNext
-            | Message::DateToday
-            | Message::DatePickerToggle
-            | Message::DatePickerMonthPrev
-            | Message::DatePickerMonthNext
-            | Message::DatePickerSelect(_) => self.update_navigation(message),
+            Message::Nav(msg) => self.update_navigation(msg),
 
             // ── Entries / Timer ──
-            Message::EntriesLoaded(..)
-            | Message::AssignmentsLoaded(_)
-            | Message::SyncAssignments
-            | Message::StatsLoaded(..)
-            | Message::ShowAddForm
-            | Message::EditEntry(_)
-            | Message::CancelForm
-            | Message::FormProjectQueryChanged(_)
-            | Message::FormProjectSelected(_)
-            | Message::FormHoursChanged(_)
-            | Message::FormNotesChanged(_)
-            | Message::FormFocusHours
-            | Message::FormFocusNotes
-            | Message::FormSubmit
-            | Message::EntryCreated(_)
-            | Message::EntryUpdated(_)
-            | Message::DeleteRequest(_)
-            | Message::DeleteCancel
-            | Message::DeleteEntry(_)
-            | Message::EntryDeleted(_)
-            | Message::TimerStart(_)
-            | Message::TimerStop(_)
-            | Message::TimerStarted(_)
-            | Message::TimerStopped(_)
-            | Message::TemplateApply(_) => self.update_entries(message),
+            Message::Entry(msg) => self.update_entries(*msg),
 
             // ── Work Day ──
-            Message::StartDay
-            | Message::StartBreak
-            | Message::EndBreak
-            | Message::EndDay
-            | Message::ResumeDay
-            | Message::WorkDayTick
-            | Message::WorkDayEditStart
-            | Message::WorkDayEditCancel
-            | Message::WorkDayStartInputChanged(_)
-            | Message::WorkDayEndInputChanged(_)
-            | Message::WorkDayBreakStartChanged(..)
-            | Message::WorkDayBreakEndChanged(..)
-            | Message::WorkDayBreakDelete(_)
-            | Message::WorkDayBreakAdd
-            | Message::WorkDayEditSave => self.update_work_day(message),
+            Message::WorkDay(msg) => self.update_work_day(msg),
 
             // ── Settings ──
-            Message::Disconnect
-            | Message::WizardNext
-            | Message::WizardBack
-            | Message::SettingsTokenChanged(_)
-            | Message::SettingsAccountIdChanged(_)
-            | Message::SettingsSave
-            | Message::SettingsConnected(_)
-            | Message::SettingsWeeklyHoursChanged(_)
-            | Message::SettingsPercentageChanged(_)
-            | Message::SettingsHolidaysChanged(_)
-            | Message::SettingsFirstWorkDayChanged(_)
-            | Message::SettingsCarryoverYearChanged(_)
-            | Message::SettingsCarryoverHolidayChanged(_)
-            | Message::SettingsCarryoverOvertimeChanged(_)
-            | Message::SettingsCarryoverSave
-            | Message::SettingsCarryoverDelete(_)
-            | Message::SettingsSaveProfile
-            | Message::HolidayTaskToggle(_)
-            | Message::HolidayTaskQueryChanged(_)
-            | Message::HolidayViewYearPrev
-            | Message::HolidayViewYearNext
-            | Message::SettingsTemplateAddOpen
-            | Message::SettingsTemplateAddCancel
-            | Message::SettingsTemplateAddLabelChanged(_)
-            | Message::SettingsTemplateAddProjectQueryChanged(_)
-            | Message::SettingsTemplateAddProjectSelected(_)
-            | Message::SettingsTemplateAddHoursChanged(_)
-            | Message::SettingsTemplateAddNotesChanged(_)
-            | Message::SettingsTemplateAddSave
-            | Message::SettingsTemplateDelete(_)
-            | Message::SettingsDataDirChanged(_)
-            | Message::SettingsPickDataDir
-            | Message::SettingsDataDirPicked(_)
-            | Message::SettingsSaveDataDir
-            | Message::SettingsAutostartToggle => self.update_settings(message),
+            Message::Settings(msg) => self.update_settings(msg),
 
             // ── Vacation ──
-            Message::VacationYearPrev
-            | Message::VacationYearNext
-            | Message::VacationRefresh
-            | Message::VacationEntriesLoaded(..)
-            | Message::VacationShowForm
-            | Message::VacationHideForm
-            | Message::VacationFromChanged(_)
-            | Message::VacationToChanged(_)
-            | Message::VacationDayTypeFull
-            | Message::VacationDayTypeHalf
-            | Message::VacationFormSubmit
-            | Message::VacationEntriesCreated(_)
-            | Message::VacationDeleteEntry(_)
-            | Message::VacationEntryDeleted(_) => self.update_vacation(message),
+            Message::Vacation(msg) => self.update_vacation(msg),
 
             // ── Billable ──
-            Message::BillableYearPrev
-            | Message::BillableYearNext
-            | Message::BillableRefresh
-            | Message::BillableEntriesLoaded(..)
-            | Message::BillableMonthSelected(_)
-            | Message::BillableMonthClear => self.update_billable(message),
+            Message::Billable(msg) => self.update_billable(msg),
 
             // ── Stats ──
-            Message::StatsRefresh
-            | Message::OvertimeYearPrev
-            | Message::OvertimeYearNext => self.update_stats(message),
+            Message::Stats(msg) => self.update_stats(msg),
 
             // ── Small inline arms ──
             Message::FontLoaded(_) => Task::none(),
@@ -152,10 +81,8 @@ impl EasyHarvest {
 
             Message::TrayToggle => {
                 if let Some(id) = self.window_id {
-                    // Window is open — close it.
-                    self.window_id = None;
-                    self.window_visible = false;
-                    window::close(id)
+                    // Window exists — bring it to front.
+                    window::gain_focus(id)
                 } else {
                     // Window was closed — reopen it.
                     let (new_id, open_task) = window::open(window_settings());
@@ -185,9 +112,9 @@ impl EasyHarvest {
 
     // ── Navigation / Date ────────────────────────────────────────────────────
 
-    fn update_navigation(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::PageChanged(page) => {
+    fn update_navigation(&mut self, msg: NavMsg) -> Task<Message> {
+        match msg {
+            NavMsg::PageChanged(page) => {
                 self.entry_form = None;
                 self.error_banner = None;
                 let task = match &page {
@@ -240,7 +167,7 @@ impl EasyHarvest {
                 task
             }
 
-            Message::DatePrev => {
+            NavMsg::DatePrev => {
                 self.current_date -= chrono::Duration::days(1);
                 self.maybe_reload_work_day_store();
                 self.recompute_expected_hours();
@@ -251,7 +178,7 @@ impl EasyHarvest {
                 self.load_entries_task()
             }
 
-            Message::DateNext => {
+            NavMsg::DateNext => {
                 self.current_date += chrono::Duration::days(1);
                 self.maybe_reload_work_day_store();
                 self.recompute_expected_hours();
@@ -262,7 +189,7 @@ impl EasyHarvest {
                 self.load_entries_task()
             }
 
-            Message::DateToday => {
+            NavMsg::DateToday => {
                 self.current_date = Local::now().naive_local().date();
                 self.maybe_reload_work_day_store();
                 self.recompute_expected_hours();
@@ -273,13 +200,13 @@ impl EasyHarvest {
                 self.load_entries_task()
             }
 
-            Message::DatePickerToggle => {
+            NavMsg::DatePickerToggle => {
                 self.date_picker.open = !self.date_picker.open;
                 self.date_picker.month = self.current_date;
                 Task::none()
             }
 
-            Message::DatePickerMonthPrev => {
+            NavMsg::DatePickerMonthPrev => {
                 let d = self.date_picker.month;
                 self.date_picker.month = if d.month() == 1 {
                     NaiveDate::from_ymd_opt(d.year() - 1, 12, 1).expect("valid backward date")
@@ -289,7 +216,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::DatePickerMonthNext => {
+            NavMsg::DatePickerMonthNext => {
                 let d = self.date_picker.month;
                 self.date_picker.month = if d.month() == 12 {
                     NaiveDate::from_ymd_opt(d.year() + 1, 1, 1).expect("valid forward date")
@@ -299,7 +226,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            Message::DatePickerSelect(date) => {
+            NavMsg::DatePickerSelect(date) => {
                 self.date_picker.open = false;
                 self.current_date = date;
                 self.maybe_reload_work_day_store();
@@ -310,8 +237,6 @@ impl EasyHarvest {
                 self.entries_gen += 1;
                 self.load_entries_task()
             }
-
-            _ => unreachable!(),
         }
     }
 }

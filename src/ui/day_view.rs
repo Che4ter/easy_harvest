@@ -5,7 +5,7 @@ use iced::widget::{
 use iced::{Alignment, Color, Element, Length, Padding};
 
 use crate::app::{
-    EasyHarvest, Message, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR,
+    EasyHarvest, EntryMsg, Message, NavMsg, WorkDayMsg, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR,
     FONT_SEMIBOLD, SUCCESS, SURFACE, SURFACE_HOVER, SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY,
 };
 use crate::harvest::models::TimeEntry;
@@ -14,8 +14,9 @@ use crate::state::work_day::WorkPhase;
 
 use super::{
     caption, compact_ghost_btn, danger_btn_style, dropdown_container_style,
-    field_label, ghost_btn_lg, ghost_btn_style, list_row_style, month_name, primary_btn_lg,
-    suggestion_btn_style, with_alpha,
+    field_label, ghost_btn_lg, list_row_style, month_name,
+    nav_arrow_btn, primary_btn_lg, section_heading, suggestion_btn_style, with_alpha,
+    LIST_ROW_SPACING,
 };
 
 pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
@@ -69,7 +70,7 @@ fn date_header(state: &EasyHarvest) -> Element<'_, Message> {
             ..Default::default()
         })
         .padding([0, 0])
-        .on_press(Message::DateToday)
+        .on_press(Message::Nav(NavMsg::DateToday))
         .into()
     };
 
@@ -82,14 +83,14 @@ fn date_header(state: &EasyHarvest) -> Element<'_, Message> {
         ..Default::default()
     })
     .padding([0, 0])
-    .on_press(Message::DatePickerToggle);
+    .on_press(Message::Nav(NavMsg::DatePickerToggle));
 
     let date_label: Element<Message> = column![date_btn, today_link]
         .spacing(1)
         .into();
 
-    let prev_btn = ghost_btn("‹", Message::DatePrev);
-    let next_btn = ghost_btn("›", Message::DateNext);
+    let prev_btn: Element<Message> = nav_arrow_btn("‹").on_press(Message::Nav(NavMsg::DatePrev)).into();
+    let next_btn: Element<Message> = nav_arrow_btn("›").on_press(Message::Nav(NavMsg::DateNext)).into();
 
     let lock_badge: Element<Message> = day_lock_badge(&state.entries);
 
@@ -130,7 +131,7 @@ fn day_lock_badge(entries: &[crate::harvest::models::TimeEntry]) -> Element<'sta
         ("Locked", ACCENT)
     };
     container(
-        text(label).font(FONT_MEDIUM).size(11).color(color),
+        text(label).font(FONT_MEDIUM).size(12).color(color),
     )
     .style(move |_| container::Style {
         background: Some(iced::Background::Color(Color {
@@ -193,7 +194,7 @@ fn hours_summary(state: &EasyHarvest) -> Element<'_, Message> {
     let track = super::progress_bar(pct, bar_color, 6);
 
     container(
-        column![labels, Space::new(), track].spacing(0),
+        column![labels, track].spacing(6),
     )
     .style(|_| container::Style {
         background: Some(iced::Background::Color(SURFACE)),
@@ -256,25 +257,25 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
     // Right-side controls for the status row
     let controls: Element<Message> = if in_edit {
         row![
-            wd_secondary_btn("Cancel", Message::WorkDayEditCancel),
+            wd_secondary_btn("Cancel", Message::WorkDay(WorkDayMsg::EditCancel)),
             Space::new().width(6).height(6),
-            wd_primary_btn("Save", SUCCESS, Message::WorkDayEditSave),
+            wd_primary_btn("Save", SUCCESS, Message::WorkDay(WorkDayMsg::EditSave)),
         ]
         .align_y(Alignment::Center)
         .into()
     } else if is_today {
         match phase {
-            WorkPhase::NotStarted => wd_primary_btn("Start Day", SUCCESS, Message::StartDay),
+            WorkPhase::NotStarted => wd_primary_btn("Start Day", SUCCESS, Message::WorkDay(WorkDayMsg::Start)),
             WorkPhase::Working => row![
-                wd_secondary_btn("Start Break", Message::StartBreak),
+                wd_secondary_btn("Start Break", Message::WorkDay(WorkDayMsg::StartBreak)),
                 Space::new().width(6).height(6),
-                wd_primary_btn("End Day", DANGER, Message::EndDay),
+                wd_primary_btn("End Day", DANGER, Message::WorkDay(WorkDayMsg::End)),
             ]
             .align_y(Alignment::Center)
             .into(),
-            WorkPhase::OnBreak => wd_primary_btn("End Break", ACCENT, Message::EndBreak),
+            WorkPhase::OnBreak => wd_primary_btn("End Break", ACCENT, Message::WorkDay(WorkDayMsg::EndBreak)),
             WorkPhase::Ended => row![
-                wd_secondary_btn("Resume Day", Message::ResumeDay),
+                wd_secondary_btn("Resume Day", Message::WorkDay(WorkDayMsg::Resume)),
             ]
             .align_y(Alignment::Center)
             .into(),
@@ -305,8 +306,8 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
 
     // "Edit" button — only shown in display mode after the day has started
     let edit_btn: Element<Message> = if !in_edit && is_today && phase != WorkPhase::NotStarted {
-        button(text("Edit").font(FONT_MEDIUM).size(11).color(TEXT_MUTED))
-            .on_press(Message::WorkDayEditStart)
+        button(text("Edit").font(FONT_MEDIUM).size(12).color(TEXT_MUTED))
+            .on_press(Message::WorkDay(WorkDayMsg::EditStart))
             .padding([1, 6])
             .style(|_: &iced::Theme, status| button::Style {
                 background: Some(iced::Background::Color(match status {
@@ -354,7 +355,7 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
     {
         let pct = (worked_h / expected).min(1.0) as f32;
         let bar_color = if worked_h >= expected { SUCCESS } else { ACCENT };
-        column![Space::new(), super::progress_bar(pct, bar_color, 4)]
+        column![Space::new().height(4), super::progress_bar(pct, bar_color, 4)]
             .spacing(0)
             .into()
     } else {
@@ -375,15 +376,6 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
 }
 
 fn work_day_edit_panel(state: &EasyHarvest) -> Element<'_, Message> {
-    let time_input = |placeholder: &'static str, value: &str, msg: fn(String) -> Message| {
-        text_input(placeholder, value)
-            .on_input(msg)
-            .size(12)
-            .padding([3, 6])
-            .width(58)
-            .style(super::input_style)
-    };
-
     let label_col = |s: &str| -> Element<Message> {
         text(s.to_owned()).font(FONT_REGULAR).size(12).color(TEXT_MUTED).width(46).into()
     };
@@ -395,7 +387,9 @@ fn work_day_edit_panel(state: &EasyHarvest) -> Element<'_, Message> {
     // Start row
     let start_row: Element<Message> = row![
         label_col("Start"),
-        time_input("HH:MM", &state.work_day_edit.start_input, Message::WorkDayStartInputChanged),
+        text_input("HH:MM", &state.work_day_edit.start_input)
+            .on_input(|v| Message::WorkDay(WorkDayMsg::StartInputChanged(v)))
+            .size(12).padding([3, 6]).width(58).style(super::input_style),
     ]
     .spacing(6)
     .align_y(Alignment::Center)
@@ -406,18 +400,18 @@ fn work_day_edit_panel(state: &EasyHarvest) -> Element<'_, Message> {
 
     for (idx, (b_start, b_end)) in state.work_day_edit.break_inputs.iter().enumerate() {
         let label = format!("Break {}", idx + 1);
-        let del_btn = super::delete_chip_btn(Message::WorkDayBreakDelete(idx));
+        let del_btn = super::delete_chip_btn(Message::WorkDay(WorkDayMsg::BreakDelete(idx)));
 
         let bs = b_start.clone();
         let be = b_end.clone();
         let row_el: Element<Message> = row![
             label_col(&label),
             text_input("HH:MM", &bs)
-                .on_input(move |v| Message::WorkDayBreakStartChanged(idx, v))
+                .on_input(move |v| Message::WorkDay(WorkDayMsg::BreakStartChanged(idx, v)))
                 .size(12).padding([3, 6]).width(58).style(super::input_style),
             arrow(),
             text_input("HH:MM", &be)
-                .on_input(move |v| Message::WorkDayBreakEndChanged(idx, v))
+                .on_input(move |v| Message::WorkDay(WorkDayMsg::BreakEndChanged(idx, v)))
                 .size(12).padding([3, 6]).width(58).style(super::input_style),
             del_btn,
         ]
@@ -430,7 +424,9 @@ fn work_day_edit_panel(state: &EasyHarvest) -> Element<'_, Message> {
     // End row
     let end_row: Element<Message> = row![
         label_col("End"),
-        time_input("HH:MM", &state.work_day_edit.end_input, Message::WorkDayEndInputChanged),
+        text_input("HH:MM", &state.work_day_edit.end_input)
+            .on_input(|v| Message::WorkDay(WorkDayMsg::EndInputChanged(v)))
+            .size(12).padding([3, 6]).width(58).style(super::input_style),
     ]
     .spacing(6)
     .align_y(Alignment::Center)
@@ -439,9 +435,9 @@ fn work_day_edit_panel(state: &EasyHarvest) -> Element<'_, Message> {
 
     // + Add Break button
     let add_break_btn: Element<Message> = button(
-        text("+ Add Break").font(FONT_MEDIUM).size(11).color(ACCENT),
+        text("+ Add Break").font(FONT_MEDIUM).size(12).color(ACCENT),
     )
-    .on_press(Message::WorkDayBreakAdd)
+    .on_press(Message::WorkDay(WorkDayMsg::BreakAdd))
     .padding([3, 8])
     .style(|_, status| button::Style {
         background: Some(iced::Background::Color(match status {
@@ -456,7 +452,7 @@ fn work_day_edit_panel(state: &EasyHarvest) -> Element<'_, Message> {
     rows.push(add_break_btn);
 
     column![
-        Space::new(),
+        Space::new().height(6),
         column(rows).spacing(5),
     ]
     .spacing(0)
@@ -519,20 +515,17 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
     )
     .style(super::accent_btn_style)
     .padding([8, 18])
-    .on_press(Message::ShowAddForm);
+    .on_press(Message::Entry(Box::new(EntryMsg::ShowForm)));
 
     let header = container(
         row![
-            text("Time Entries")
-                .font(FONT_SEMIBOLD)
-                .size(14)
-                .color(TEXT_PRIMARY),
+            section_heading("Time Entries"),
             Space::new().width(Length::Fill),
             add_btn,
         ]
         .align_y(Alignment::Center),
     )
-    .padding(Padding { top: 0.0, right: 0.0, bottom: 12.0, left: 0.0 })
+    .padding(Padding::ZERO.bottom(12))
     .width(Length::Fill);
 
     let entries: Element<Message> = if state.loading {
@@ -553,7 +546,6 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
                     .font(FONT_MEDIUM)
                     .size(14)
                     .color(TEXT_MUTED),
-                Space::new(),
                 text("Click + Add Entry to start tracking")
                     .font(FONT_REGULAR)
                     .size(12)
@@ -564,6 +556,7 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
                         a: 0.6,
                     }),
             ]
+            .spacing(6)
             .align_x(Alignment::Center),
         )
         .padding([40, 0])
@@ -578,7 +571,7 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
             .map(|e| entry_row(e, pending))
             .collect();
         scrollable(
-            column(rows).spacing(6).width(Length::Fill).padding([0, 2]),
+            column(rows).spacing(LIST_ROW_SPACING).width(Length::Fill).padding([0, 2]),
         )
         .height(Length::Fill)
         .into()
@@ -630,15 +623,15 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
     };
 
     let hours = text(super::format_hhmm(entry.hours))
-        .font(FONT_SEMIBOLD).size(15).color(ACCENT);
+        .font(FONT_SEMIBOLD).size(13).color(ACCENT);
 
     let timer_btn: Element<Message> = if entry.is_running {
         compact_ghost_btn("■  Stop", SUCCESS)
-            .on_press(Message::TimerStop(entry.id))
+            .on_press(Message::Entry(Box::new(EntryMsg::TimerStop(entry.id))))
             .into()
     } else if !entry.is_locked && entry.approval_status.as_deref() != Some("submitted") {
         compact_ghost_btn("▶  Start", TEXT_MUTED)
-            .on_press(Message::TimerStart(entry.id))
+            .on_press(Message::Entry(Box::new(EntryMsg::TimerStart(entry.id))))
             .into()
     } else {
         Space::new().into()
@@ -655,12 +648,12 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
             text("Delete?").font(FONT_MEDIUM).size(12).color(DANGER),
             Space::new().width(6).height(6),
             compact_ghost_btn("Cancel", TEXT_MUTED)
-                .on_press(Message::DeleteCancel),
+                .on_press(Message::Entry(Box::new(EntryMsg::DeleteCancel))),
             Space::new().width(4).height(4),
             button(text("Confirm").font(FONT_SEMIBOLD).size(12).color(Color::WHITE))
                 .style(danger_btn_style)
                 .padding([3, 8])
-                .on_press(Message::DeleteEntry(entry.id)),
+                .on_press(Message::Entry(Box::new(EntryMsg::Delete(entry.id)))),
         ]
         .align_y(Alignment::Center)
         .into()
@@ -669,10 +662,10 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
             timer_btn,
             Space::new().width(2).height(2),
             compact_ghost_btn("Edit", TEXT_MUTED)
-                .on_press(Message::EditEntry(entry.id)),
+                .on_press(Message::Entry(Box::new(EntryMsg::Edit(entry.id)))),
             Space::new().width(2).height(2),
             compact_ghost_btn("Delete", DANGER)
-                .on_press(Message::DeleteRequest(entry.id)),
+                .on_press(Message::Entry(Box::new(EntryMsg::DeleteRequest(entry.id)))),
         ]
         .align_y(Alignment::Center)
         .into()
@@ -689,11 +682,10 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
 
     let right_col = column![
         locked_indicator,
-        Space::new(),
         hours,
-        Space::new(),
         actions,
     ]
+    .spacing(4)
     .align_x(Alignment::End);
 
     container(
@@ -752,21 +744,20 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
                         ..Default::default()
                     })
                     .padding([5, 10])
-                    .on_press(Message::TemplateApply(idx))
+                    .on_press(Message::Entry(Box::new(EntryMsg::TemplateApply(idx))))
                     .into()
             })
             .collect();
 
         column![
             caption("Quick fill from template"),
-            Space::new(),
             scrollable(row(chips).spacing(6))
                 .direction(scrollable::Direction::Horizontal(
                     scrollable::Scrollbar::new().width(2).scroller_width(2),
                 ))
                 .width(Length::Fill),
         ]
-        .spacing(0)
+        .spacing(4)
         .into()
     } else {
         Space::new().into()
@@ -776,13 +767,13 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
     let project_label = field_label("Project & Task");
     let project_input = {
         let inp = text_input("Search project or task…", &form.project_query)
-            .on_input(Message::FormProjectQueryChanged)
+            .on_input(|v| Message::Entry(Box::new(EntryMsg::ProjectQueryChanged(v))))
             .size(14)
             .padding([10, 12])
             .style(super::input_style);
         // Advance focus to hours when project is already confirmed
         if form.selected_project_idx.is_some() {
-            inp.on_submit(Message::FormFocusHours)
+            inp.on_submit(Message::Entry(Box::new(EntryMsg::FocusHours)))
         } else {
             inp
         }
@@ -815,7 +806,7 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
                 .style(suggestion_btn_style)
                 .padding([8, 12])
                 .width(Length::Fill)
-                .on_press(Message::FormProjectSelected(idx))
+                .on_press(Message::Entry(Box::new(EntryMsg::ProjectSelected(idx))))
                 .into()
             })
             .collect();
@@ -832,8 +823,8 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
     let hours_label = field_label("Hours");
     let hours_input = text_input("e.g. 2:30", &form.hours_input)
         .id(iced::widget::Id::new("form_hours"))
-        .on_input(Message::FormHoursChanged)
-        .on_submit(Message::FormFocusNotes)
+        .on_input(|v| Message::Entry(Box::new(EntryMsg::HoursChanged(v))))
+        .on_submit(Message::Entry(Box::new(EntryMsg::FocusNotes)))
         .size(14)
         .padding([10, 12])
         .style(super::input_style);
@@ -842,8 +833,8 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
     let notes_label = field_label("Notes (optional)");
     let notes_input = text_input("What did you work on?", &form.notes_input)
         .id(iced::widget::Id::new("form_notes"))
-        .on_input(Message::FormNotesChanged)
-        .on_submit(Message::FormSubmit)
+        .on_input(|v| Message::Entry(Box::new(EntryMsg::NotesChanged(v))))
+        .on_submit(Message::Entry(Box::new(EntryMsg::Submit)))
         .size(14)
         .padding([10, 12])
         .style(super::input_style);
@@ -866,36 +857,27 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
         "Add Entry"
     };
     let submit_btn = primary_btn_lg(submit_label)
-        .on_press(Message::FormSubmit);
+        .on_press(Message::Entry(Box::new(EntryMsg::Submit)));
 
     let cancel_btn = ghost_btn_lg("Cancel")
-        .on_press(Message::CancelForm);
+        .on_press(Message::Entry(Box::new(EntryMsg::CancelForm)));
 
     scrollable(
         container(
             column![
                 heading,
-                Space::new(),
                 templates_section,
-                Space::new(),
                 project_label,
-                Space::new(),
                 project_input,
                 suggestion_list,
-                Space::new(),
                 hours_label,
-                Space::new(),
                 hours_input,
-                Space::new(),
                 notes_label,
-                Space::new(),
                 notes_input,
-                Space::new(),
                 error,
-                Space::new(),
                 row![cancel_btn, Space::new().width(Length::Fill), submit_btn],
             ]
-            .spacing(0),
+            .spacing(6),
         )
         .padding(12)
         .width(Length::Fill),
@@ -925,14 +907,14 @@ fn date_picker_view(state: &EasyHarvest) -> Element<'_, Message> {
 
     // Month header
     let header = row![
-        ghost_btn("‹", Message::DatePickerMonthPrev),
+        nav_arrow_btn("‹").on_press(Message::Nav(NavMsg::DatePickerMonthPrev)),
         Space::new().width(Length::Fill),
         text(format!("{} {year}", month_name(month)))
             .font(FONT_SEMIBOLD)
             .size(15)
             .color(TEXT_PRIMARY),
         Space::new().width(Length::Fill),
-        ghost_btn("›", Message::DatePickerMonthNext),
+        nav_arrow_btn("›").on_press(Message::Nav(NavMsg::DatePickerMonthNext)),
     ]
     .align_y(Alignment::Center);
 
@@ -940,7 +922,7 @@ fn date_picker_view(state: &EasyHarvest) -> Element<'_, Message> {
     let dow_cells: Vec<Element<Message>> = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
         .iter()
         .map(|d| {
-            container(text(*d).font(FONT_MEDIUM).size(11).color(TEXT_MUTED))
+            container(text(*d).font(FONT_MEDIUM).size(12).color(TEXT_MUTED))
                 .width(Length::FillPortion(1))
                 .align_x(Alignment::Center)
                 .into()
@@ -1006,7 +988,7 @@ fn date_picker_view(state: &EasyHarvest) -> Element<'_, Message> {
                         })
                         .padding([4, 2])
                         .width(Length::FillPortion(1))
-                        .on_press(Message::DatePickerSelect(date))
+                        .on_press(Message::Nav(NavMsg::DatePickerSelect(date)))
                         .into()
                     }
                 })
@@ -1037,24 +1019,11 @@ fn date_picker_view(state: &EasyHarvest) -> Element<'_, Message> {
         .into()
 }
 
-fn ghost_btn(label: &str, msg: Message) -> Element<'_, Message> {
-    button(
-        text(label)
-            .font(FONT_SEMIBOLD)
-            .size(20)
-            .color(TEXT_MUTED),
-    )
-    .style(ghost_btn_style)
-    .padding([4, 10])
-    .on_press(msg)
-    .into()
-}
-
 fn status_badge(label: &str, color: Color) -> Element<'static, Message> {
     container(
         text(label.to_string())
             .font(FONT_MEDIUM)
-            .size(10)
+            .size(11)
             .color(color)
             .wrapping(iced::widget::text::Wrapping::None),
     )
