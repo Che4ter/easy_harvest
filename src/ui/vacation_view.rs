@@ -26,16 +26,16 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
     let year_row = row![
         nav_arrow_btn("‹").on_press(Message::VacationYearPrev),
-        Space::with_width(10),
+        Space::new().width(10).height(10),
         text(year.to_string())
             .font(FONT_SEMIBOLD)
             .size(18)
             .color(TEXT_PRIMARY),
-        Space::with_width(10),
+        Space::new().width(10).height(10),
         nav_arrow_btn("›").on_press(Message::VacationYearNext),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         refresh_btn("↻  Refresh").on_press(Message::VacationRefresh),
-        Space::with_width(8),
+        Space::new().width(8).height(8),
         primary_btn(add_label).on_press(add_msg),
     ]
     .align_y(Alignment::Center);
@@ -45,7 +45,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         return scrollable(
             column![
                 year_row,
-                Space::with_height(20),
+                Space::new(),
                 text("Configure holiday tasks in Settings → Holiday Tasks to track vacation.")
                     .font(FONT_REGULAR)
                     .size(13)
@@ -62,7 +62,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         return scrollable(
             column![
                 year_row,
-                Space::with_height(20),
+                Space::new(),
                 text("Loading…").font(FONT_REGULAR).size(13).color(TEXT_MUTED),
             ]
             .spacing(0)
@@ -95,16 +95,16 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
     let summary_row = row![
         stat_chip("Used",      format!("{:.1}", used_days),      format!("({:.1}h)", used_days      * expected_per_day), ACCENT),
-        Space::with_width(8),
+        Space::new().width(8).height(8),
         stat_chip("Planned",   format!("{:.1}", booked_days),    format!("({:.1}h)", booked_days    * expected_per_day), PLANNED_COLOR),
-        Space::with_width(8),
+        Space::new().width(8).height(8),
         stat_chip("Remaining", format!("{:.1}", days_remaining), format!("({:.1}h)", days_remaining * expected_per_day), rem_color),
     ];
 
     // Add form
     let form_el: Element<Message> = match &state.vacation.form {
         Some(form) => vacation_form_view(form, expected_per_day),
-        None => Space::with_height(0).into(),
+        None => Space::new().into(),
     };
 
     // Entry list
@@ -130,9 +130,9 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
     scrollable(
         column![
             year_row,
-            Space::with_height(14),
+            Space::new(),
             summary_row,
-            Space::with_height(4),
+            Space::new(),
             {
                 let carryover_str = if carryover_days != 0.0 {
                     format!(
@@ -150,10 +150,10 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
                     total_days * expected_per_day
                 ))
             },
-            Space::with_height(14),
+            Space::new(),
             form_el,
             body,
-            Space::with_height(16),
+            Space::new(),
         ]
         .spacing(0)
         .padding(Padding { top: 12.0, right: 12.0, bottom: 0.0, left: 12.0 }),
@@ -185,7 +185,7 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
         .padding([5, 14])
         .on_press(Message::VacationDayTypeHalf);
 
-    let day_type_row = row![full_btn, Space::with_width(8), half_btn].align_y(Alignment::Center);
+    let day_type_row = row![full_btn, Space::new().width(8).height(8), half_btn].align_y(Alignment::Center);
 
     let date_inputs = row![
         column![
@@ -198,7 +198,7 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
         ]
         .spacing(4)
         .width(Length::Fill),
-        Space::with_width(10),
+        Space::new().width(10).height(10),
         column![
             text("To").font(FONT_MEDIUM).size(12).color(TEXT_MUTED),
             text_input("DD.MM.YYYY  (same as From = single day)", &form.to_input)
@@ -221,7 +221,7 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
             .color(DANGER)
             .into()
     } else {
-        Space::with_height(0).into()
+        Space::new().into()
     };
 
     let submit_label = if form.submitting { "Adding…" } else { "Add vacation" };
@@ -234,12 +234,12 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
 
     let form_content = column![
         date_inputs,
-        Space::with_height(10),
+        Space::new(),
         day_type_row,
-        Space::with_height(6),
+        Space::new(),
         hint,
         error_el,
-        Space::with_height(10),
+        Space::new(),
         row![submit_btn].align_y(Alignment::Center),
     ]
     .spacing(0);
@@ -262,7 +262,7 @@ fn vacation_form_view(form: &VacationForm, expected_per_day: f64) -> Element<'_,
         .padding([14, 14])
         .width(Length::Fill);
 
-    column![card, Space::with_height(14)].spacing(0).into()
+    column![card, Space::new()].spacing(0).into()
 }
 
 // ── Entry row ─────────────────────────────────────────────────────────────────
@@ -291,14 +291,14 @@ fn vacation_row(
     let notes_el: Element<'_, Message> = if !notes.is_empty() {
         caption(notes).into()
     } else {
-        Space::with_height(0).into()
+        Space::new().into()
     };
 
     let delete_btn: Element<Message> = if is_future {
         let id = entry.id;
         delete_chip_btn(Message::VacationDeleteEntry(id))
     } else {
-        Space::with_width(0).into()
+        Space::new().into()
     };
 
     container(

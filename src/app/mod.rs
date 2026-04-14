@@ -1,6 +1,6 @@
 use chrono::{Datelike, Local, NaiveDate};
 use iced::font::Family;
-use iced::widget::{button, container, row, text, text_input, Space};
+use iced::widget::{button, container, row, text, Space};
 use iced::{
     self, font, keyboard, window, Color, Element, Font, Subscription, Task, Theme,
 };
@@ -13,7 +13,7 @@ use crate::state::persistence::WorkDayStore;
 use crate::state::bootstrap::BootstrapConfig;
 use crate::state::settings::{swiss_public_holidays, PublicHoliday, Settings};
 use crate::state::templates::Templates;
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "macos"))]
 use crate::state::work_day::WorkPhase;
 use crate::stats::{year_to_date_balance, HolidayStats, YearBalance};
 use crate::ui::{billable_view, day_view, settings_view, stats_view, vacation_view};
@@ -191,8 +191,8 @@ impl EntryForm {
         Self {
             editing_id: Some(entry.id),
             project_query: format!(
-                "{} — {}",
-                entry.project.name, entry.task.name
+                "{} > {} — {}",
+                entry.client.name, entry.project.name, entry.task.name
             ),
             selected_project_idx: None,
             hours_input: format!("{:.2}", entry.hours),
@@ -497,6 +497,7 @@ pub enum Message {
     SettingsPickDataDir,
     SettingsDataDirPicked(Option<std::path::PathBuf>),
     SettingsSaveDataDir,
+    SettingsAutostartToggle,
 
     // Settings — holiday list year navigation
     HolidayViewYearPrev,
@@ -607,10 +608,10 @@ pub struct EasyHarvest {
     pub cached_project_options: Vec<ProjectOption>,
     pub cached_expected_hours: f64,
 
-    // Tray phase (Linux only — shared with the ksni tray so menu() is phase-aware)
-    #[cfg(target_os = "linux")]
+    // Tray phase — shared with the tray thread so the context menu is phase-aware
+    #[cfg(not(target_os = "macos"))]
     pub tray_phase: std::sync::Arc<std::sync::Mutex<WorkPhase>>,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     pub tray_update_notify: std::sync::Arc<tokio::sync::Notify>,
 }
 
@@ -624,6 +625,7 @@ fn app_theme() -> Theme {
             text: TEXT_PRIMARY,
             primary: ACCENT,
             success: SUCCESS,
+            warning: ACCENT,
             danger: DANGER,
         },
     )
@@ -636,9 +638,9 @@ fn window_settings() -> window::Settings {
         size: iced::Size::new(520.0, 720.0),
         resizable: true,
         decorations: true,
-        // Intercept close on Linux so the tray can close the window while
-        // keeping the process (and tray icon) alive.
-        exit_on_close_request: !cfg!(target_os = "linux"),
+        // Intercept close on Linux/Windows so the tray can keep the process
+        // (and tray icon) alive when the window is closed.
+        exit_on_close_request: cfg!(target_os = "macos"),
         icon: window_icon(),
         ..Default::default()
     }
@@ -650,16 +652,25 @@ fn window_icon() -> Option<window::Icon> {
     window::icon::from_rgba(DATA.to_vec(), 64, 64).ok()
 }
 
+fn window_title(_state: &EasyHarvest, _window: window::Id) -> String {
+    "Easy Harvest".to_string()
+}
+
+fn window_theme(_state: &EasyHarvest, _window: window::Id) -> Theme {
+    app_theme()
+}
+
 pub fn run() -> iced::Result {
     // Use `daemon` instead of `application` so the process (and tray icon)
     // stays alive when the window is closed.  The initial window is opened
     // manually inside `EasyHarvest::new`.
-    iced::daemon("Easy Harvest", EasyHarvest::update, EasyHarvest::view)
-        .theme(|_state, _window| app_theme())
+    iced::daemon(EasyHarvest::new, EasyHarvest::update, EasyHarvest::view)
+        .title(window_title)
+        .theme(window_theme)
         .font(include_bytes!("../../assets/fonts/Inter-Regular.ttf").as_slice())
         .font(include_bytes!("../../assets/fonts/Inter-Medium.ttf").as_slice())
         .subscription(EasyHarvest::subscription)
-        .run_with(EasyHarvest::new)
+        .run()
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -692,7 +703,7 @@ impl EasyHarvest {
             .map(|d| d.format("%d.%m.%Y").to_string())
             .unwrap_or_default();
 
-        #[cfg(target_os = "linux")]
+        #[cfg(not(target_os = "macos"))]
         let initial_tray_phase = work_day_store.get_or_default(today).phase();
 
         let mut state = Self {
@@ -729,9 +740,9 @@ impl EasyHarvest {
             date_picker: DatePickerState::new(today),
             billable: BillablePageState::new(today.year()),
             window_id: None,
-            // Optimistically assume the tray works on Linux; set to false
+            // Optimistically assume the tray works on Linux/Windows; set to false
             // only if the tray subscription reports a spawn failure.
-            tray_available: cfg!(target_os = "linux"),
+            tray_available: cfg!(not(target_os = "macos")),
             window_visible: true,
             // Skip the data-folder step if the user has already configured it.
             wizard_step: if BootstrapConfig::config_path().exists() { 1 } else { 0 },
@@ -739,9 +750,9 @@ impl EasyHarvest {
             templates,
             cached_project_options: Vec::new(),
             cached_expected_hours: 0.0,
-            #[cfg(target_os = "linux")]
+            #[cfg(not(target_os = "macos"))]
             tray_phase: std::sync::Arc::new(std::sync::Mutex::new(initial_tray_phase)),
-            #[cfg(target_os = "linux")]
+            #[cfg(not(target_os = "macos"))]
             tray_update_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
         };
 

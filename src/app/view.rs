@@ -16,7 +16,7 @@ impl EasyHarvest {
 
         let nav = nav_bar(&self.page);
 
-        let mut col = column![nav].spacing(0);
+        let mut col = column![nav].spacing(0).height(iced::Length::Fill);
 
         if let Some(err) = &self.error_banner {
             col = col.push(error_banner(err));
@@ -100,7 +100,7 @@ fn nav_bar(current: &Page) -> Element<'static, Message> {
             btn("Vacation", Page::Vacation, *current == Page::Vacation),
             btn("Overtime", Page::Stats, *current == Page::Stats),
             btn("Billable", Page::Billable, *current == Page::Billable),
-            Space::with_width(iced::Length::Fill),
+            Space::new().width(iced::Length::Fill),
             settings_btn,
         ]
         .spacing(6)

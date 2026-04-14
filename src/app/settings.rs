@@ -4,6 +4,13 @@ use super::tasks::format_harvest_error;
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 impl EasyHarvest {
+    /// Save settings and surface any error via the error banner.
+    fn save_settings_or_warn(&mut self) {
+        if let Err(e) = self.settings.save() {
+            self.error_banner = Some(format!("Failed to save settings: {e}"));
+        }
+    }
+
     pub(super) fn update_settings(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Disconnect => {
@@ -13,7 +20,7 @@ impl EasyHarvest {
                 }
                 let _ = std::fs::remove_file(Settings::token_file_path(&self.settings.data_dir));
                 self.settings.account_id = String::new();
-                let _ = self.settings.save();
+                self.save_settings_or_warn();
                 self.client = None;
                 self.assignments.clear();
                 self.assignments.shrink_to_fit();
@@ -47,7 +54,7 @@ impl EasyHarvest {
                 let _ = BootstrapConfig { data_dir: new_dir.clone() }.save();
                 if new_dir != self.settings.data_dir {
                     self.settings.data_dir = new_dir;
-                    let _ = self.settings.save();
+                    self.save_settings_or_warn();
                 }
                 self.wizard_step = 1;
                 Task::none()
@@ -106,9 +113,11 @@ impl EasyHarvest {
                         let token = self.settings_form.token_input.trim().to_string();
                         let account_id =
                             self.settings_form.account_input.trim().to_string();
-                        let _ = Settings::save_token(&token, &self.settings.data_dir);
+                        if let Err(e) = Settings::save_token(&token, &self.settings.data_dir) {
+                            self.error_banner = Some(format!("Failed to save token: {e}"));
+                        }
                         self.settings.account_id = account_id.clone();
-                        let _ = self.settings.save();
+                        self.save_settings_or_warn();
                         self.client = HarvestClient::new(token, account_id).ok();
                         self.loading = true;
                         self.entries_gen += 1;
@@ -191,7 +200,7 @@ impl EasyHarvest {
 
             Message::SettingsCarryoverDelete(year) => {
                 self.settings.carryover.remove(&year);
-                let _ = self.settings.save();
+                self.save_settings_or_warn();
                 Task::none()
             }
 
@@ -227,7 +236,7 @@ impl EasyHarvest {
                     self.settings.holiday_task_ids.push(task_id);
                     self.settings_form.holiday_task_query.clear();
                 }
-                let _ = self.settings.save();
+                self.save_settings_or_warn();
                 Task::none()
             }
 
@@ -320,7 +329,9 @@ impl EasyHarvest {
                     notes: self.template_form.notes.trim().to_owned(),
                 };
                 self.templates.entries.push(tpl);
-                let _ = self.templates.save(&self.settings.data_dir);
+                if let Err(e) = self.templates.save(&self.settings.data_dir) {
+                    self.error_banner = Some(format!("Failed to save template: {e}"));
+                }
                 self.template_form.open = false;
                 Task::none()
             }
@@ -328,7 +339,9 @@ impl EasyHarvest {
             Message::SettingsTemplateDelete(idx) => {
                 if idx < self.templates.entries.len() {
                     self.templates.entries.remove(idx);
-                    let _ = self.templates.save(&self.settings.data_dir);
+                    if let Err(e) = self.templates.save(&self.settings.data_dir) {
+                        self.error_banner = Some(format!("Failed to save templates: {e}"));
+                    }
                 }
                 Task::none()
             }
@@ -364,14 +377,18 @@ impl EasyHarvest {
                     return Task::none();
                 }
                 // Write bootstrap pointer
-                let _ = BootstrapConfig { data_dir: new_dir.clone() }.save();
-                // Copy token file to new location (best-effort)
+                if let Err(e) = (BootstrapConfig { data_dir: new_dir.clone() }).save() {
+                    self.error_banner = Some(format!("Failed to save bootstrap config: {e}"));
+                }
+                // Copy token file to new location
                 if let Some(token) = Settings::load_token(&self.settings.data_dir) {
-                    let _ = Settings::save_token(&token, &new_dir);
+                    if let Err(e) = Settings::save_token(&token, &new_dir) {
+                        self.error_banner = Some(format!("Failed to copy token: {e}"));
+                    }
                 }
                 // Move to new data dir
                 self.settings.data_dir = new_dir.clone();
-                let _ = self.settings.save();
+                self.save_settings_or_warn();
                 self.work_day_store = crate::state::persistence::WorkDayStore::load(
                     &new_dir,
                     self.current_date.year(),
@@ -398,6 +415,25 @@ impl EasyHarvest {
                 } else {
                     Task::none()
                 }
+            }
+
+            Message::SettingsAutostartToggle => {
+                let enabled = !self.settings.autostart;
+                let result = if enabled {
+                    crate::autostart::enable()
+                } else {
+                    crate::autostart::disable()
+                };
+                match result {
+                    Ok(()) => {
+                        self.settings.autostart = enabled;
+                        self.save_settings_or_warn();
+                    }
+                    Err(e) => {
+                        self.error_banner = Some(format!("Autostart: {e}"));
+                    }
+                }
+                Task::none()
             }
 
             _ => unreachable!(),

@@ -16,14 +16,14 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
     let year_row = row![
         nav_arrow_btn("‹").on_press(Message::BillableYearPrev),
-        Space::with_width(10),
+        Space::new().width(10).height(10),
         text(year.to_string())
             .font(FONT_SEMIBOLD)
             .size(18)
             .color(TEXT_PRIMARY),
-        Space::with_width(10),
+        Space::new().width(10).height(10),
         nav_arrow_btn("›").on_press(Message::BillableYearNext),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         refresh_btn("↻  Refresh").on_press(Message::BillableRefresh),
     ]
     .align_y(Alignment::Center);
@@ -46,9 +46,9 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         return scrollable(
             column![
                 year_row,
-                Space::with_height(8),
+                Space::new(),
                 month_row,
-                Space::with_height(12),
+                Space::new(),
                 text("Loading…").font(FONT_REGULAR).size(13).color(TEXT_MUTED),
             ]
             .spacing(0)
@@ -64,9 +64,9 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         return scrollable(
             column![
                 year_row,
-                Space::with_height(8),
+                Space::new(),
                 month_row,
-                Space::with_height(12),
+                Space::new(),
                 text("No entries for this period.")
                     .font(FONT_REGULAR)
                     .size(13)
@@ -83,9 +83,9 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         return scrollable(
             column![
                 year_row,
-                Space::with_height(8),
+                Space::new(),
                 month_row,
-                Space::with_height(12),
+                Space::new(),
                 text("No entries for this period.")
                     .font(FONT_REGULAR)
                     .size(13)
@@ -106,9 +106,9 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
     let summary_row = row![
         stat_chip("Billable",     format_hhmm(billable_hours),     format!("({:.1}h)", billable_hours),     ACCENT),
-        Space::with_width(8),
+        Space::new().width(8).height(8),
         stat_chip("Non-billable", format_hhmm(non_billable_hours), format!("({:.1}h)", non_billable_hours), TEXT_MUTED),
-        Space::with_width(8),
+        Space::new().width(8).height(8),
         pct_chip(billable_pct, pct_color),
     ];
 
@@ -120,17 +120,17 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
     scrollable(
         column![
             year_row,
-            Space::with_height(8),
+            Space::new(),
             month_row,
-            Space::with_height(14),
+            Space::new(),
             summary_row,
-            Space::with_height(8),
+            Space::new(),
             progress_bar(billable_pct as f32, pct_color, 6),
-            Space::with_height(4),
+            Space::new(),
             caption(format!("{:.1}% of all hours are billable", billable_pct * 100.0)),
-            Space::with_height(14),
+            Space::new(),
             column(rows).spacing(4),
-            Space::with_height(16),
+            Space::new(),
         ]
         .spacing(0)
         .padding(Padding { top: 12.0, right: 12.0, bottom: 0.0, left: 12.0 }),
@@ -170,7 +170,7 @@ fn project_row<'a>(name: &str, client: &str, billable_h: f64, total_h: f64) -> E
                 .align_x(Alignment::End),
             ]
             .align_y(Alignment::Center),
-            Space::with_height(6),
+            Space::new(),
             progress_bar(pct as f32, bar_color, 4),
         ]
         .spacing(0),

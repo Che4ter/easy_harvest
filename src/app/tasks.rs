@@ -190,7 +190,7 @@ impl EasyHarvest {
     }
 
     /// Update the tray's phase so the context menu shows the correct actions.
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     pub(super) fn sync_tray_phase(&self) {
         let today = Local::now().naive_local().date();
         let day = self.work_day_store.get_or_default(today);

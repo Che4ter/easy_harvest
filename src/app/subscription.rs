@@ -11,14 +11,17 @@ impl EasyHarvest {
             Subscription::none()
         };
 
-        let tab = keyboard::on_key_press(|key, modifiers| match key {
-            keyboard::Key::Named(keyboard::key::Named::Tab) => {
-                Some(Message::TabPressed { shift: modifiers.shift() })
-            }
+        let tab = keyboard::listen().filter_map(|event| match event {
+            keyboard::Event::KeyPressed { key, modifiers, .. } => match key {
+                keyboard::Key::Named(keyboard::key::Named::Tab) => {
+                    Some(Message::TabPressed { shift: modifiers.shift() })
+                }
+                _ => None,
+            },
             _ => None,
         });
 
-        #[cfg(target_os = "linux")]
+        #[cfg(not(target_os = "macos"))]
         {
             let close = window::close_requests().map(Message::WindowCloseRequested);
             Subscription::batch([
@@ -28,7 +31,7 @@ impl EasyHarvest {
                 crate::tray::tray_subscription(self.tray_phase.clone(), self.tray_update_notify.clone()),
             ])
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "macos")]
         {
             Subscription::batch([tick, tab])
         }

@@ -24,16 +24,13 @@ pub struct Templates {
 impl Templates {
     pub fn load(data_dir: &Path) -> Self {
         let path = data_dir.join("templates.json");
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        super::io::load_json(&path).unwrap_or_default()
     }
 
     pub fn save(&self, data_dir: &Path) -> Result<(), std::io::Error> {
         std::fs::create_dir_all(data_dir)?;
         let json = serde_json::to_string_pretty(self)
             .map_err(std::io::Error::other)?;
-        std::fs::write(data_dir.join("templates.json"), json)
+        super::io::atomic_write(&data_dir.join("templates.json"), &json)
     }
 }

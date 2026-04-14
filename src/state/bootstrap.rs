@@ -45,12 +45,7 @@ impl BootstrapConfig {
     /// does not exist or cannot be parsed.
     pub fn load() -> Self {
         let path = Self::config_path();
-        if let Ok(contents) = std::fs::read_to_string(&path) {
-            if let Ok(cfg) = serde_json::from_str::<Self>(&contents) {
-                return cfg;
-            }
-        }
-        Self { data_dir: default_data_dir() }
+        super::io::load_json(&path).unwrap_or_else(|| Self { data_dir: default_data_dir() })
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
@@ -60,6 +55,6 @@ impl BootstrapConfig {
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(std::io::Error::other)?;
-        std::fs::write(path, json)
+        super::io::atomic_write(&path, &json)
     }
 }

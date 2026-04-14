@@ -47,13 +47,13 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
     let refresh_label = if state.loading { "Syncing…" } else { "↻  Refresh" };
     let heading = row![
         year_nav,
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         refresh_btn(refresh_label).on_press(Message::StatsRefresh),
     ]
     .align_y(Alignment::Center);
 
     container(
-        column![heading, Space::with_height(12), content].spacing(0),
+        column![heading, Space::new(), content].spacing(0),
     )
     .padding(12)
     .width(Length::Fill)
@@ -109,7 +109,7 @@ fn stat_card(title: String, rows: Vec<Element<'_, Message>>) -> Element<'_, Mess
     container(
         column![
             text(title).font(FONT_SEMIBOLD).size(14).color(TEXT_PRIMARY),
-            Space::with_height(16),
+            Space::new(),
             column(rows).spacing(10),
         ]
         .spacing(0),
@@ -124,7 +124,7 @@ fn empty_card<'a>(title: &'a str, hint: &'a str) -> Element<'a, Message> {
     container(
         column![
             text(title).font(FONT_SEMIBOLD).size(14).color(TEXT_MUTED),
-            Space::with_height(16),
+            Space::new(),
             text(hint).font(FONT_REGULAR).size(13).color(TEXT_MUTED),
         ]
         .spacing(0),
@@ -142,7 +142,7 @@ fn stat_row_owned(
 ) -> Element<'static, Message> {
     row![
         text(label).font(FONT_REGULAR).size(14).color(TEXT_MUTED),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         text(value)
             .font(FONT_SEMIBOLD)
             .size(14)
@@ -153,7 +153,7 @@ fn stat_row_owned(
 }
 
 fn divider() -> Element<'static, Message> {
-    container(Space::with_height(1))
+    container(Space::new())
         .style(|_| container::Style {
             background: Some(iced::Background::Color(SURFACE_RAISED)),
             ..Default::default()

@@ -3,6 +3,13 @@ use super::*;
 // ── Work Day ─────────────────────────────────────────────────────────────────
 
 impl EasyHarvest {
+    /// Save the work day store and surface any error via the error banner.
+    fn save_work_day(&mut self) {
+        if let Err(e) = self.work_day_store.save(&self.settings.data_dir) {
+            self.error_banner = Some(format!("Failed to save work day: {e}"));
+        }
+    }
+
     pub(super) fn update_work_day(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::StartDay => {
@@ -10,8 +17,8 @@ impl EasyHarvest {
                 let mut day = self.work_day_store.get_or_default(now.date());
                 day.start(now.time());
                 self.work_day_store.set(day);
-                let _ = self.work_day_store.save(&self.settings.data_dir);
-                #[cfg(target_os = "linux")]
+                self.save_work_day();
+                #[cfg(not(target_os = "macos"))]
                 self.sync_tray_phase();
                 Task::none()
             }
@@ -21,8 +28,8 @@ impl EasyHarvest {
                 let mut day = self.work_day_store.get_or_default(now.date());
                 day.start_break(now.time());
                 self.work_day_store.set(day);
-                let _ = self.work_day_store.save(&self.settings.data_dir);
-                #[cfg(target_os = "linux")]
+                self.save_work_day();
+                #[cfg(not(target_os = "macos"))]
                 self.sync_tray_phase();
                 Task::none()
             }
@@ -32,8 +39,8 @@ impl EasyHarvest {
                 let mut day = self.work_day_store.get_or_default(now.date());
                 day.end_break(now.time());
                 self.work_day_store.set(day);
-                let _ = self.work_day_store.save(&self.settings.data_dir);
-                #[cfg(target_os = "linux")]
+                self.save_work_day();
+                #[cfg(not(target_os = "macos"))]
                 self.sync_tray_phase();
                 Task::none()
             }
@@ -43,8 +50,8 @@ impl EasyHarvest {
                 let mut day = self.work_day_store.get_or_default(now.date());
                 day.end(now.time());
                 self.work_day_store.set(day);
-                let _ = self.work_day_store.save(&self.settings.data_dir);
-                #[cfg(target_os = "linux")]
+                self.save_work_day();
+                #[cfg(not(target_os = "macos"))]
                 self.sync_tray_phase();
                 Task::none()
             }
@@ -61,14 +68,14 @@ impl EasyHarvest {
                 }
                 day.end_time = None;
                 self.work_day_store.set(day);
-                let _ = self.work_day_store.save(&self.settings.data_dir);
-                #[cfg(target_os = "linux")]
+                self.save_work_day();
+                #[cfg(not(target_os = "macos"))]
                 self.sync_tray_phase();
                 Task::none()
             }
 
             Message::WorkDayTick => {
-                #[cfg(target_os = "linux")]
+                #[cfg(not(target_os = "macos"))]
                 self.sync_tray_phase();
                 Task::none()
             }
@@ -134,39 +141,61 @@ impl EasyHarvest {
             Message::WorkDayEditSave => {
                 use chrono::NaiveTime;
                 let mut day = self.work_day_store.get_or_default(self.current_date);
+                let mut errors: Vec<&str> = Vec::new();
 
                 if !self.work_day_edit.start_input.is_empty() {
-                    if let Ok(t) = NaiveTime::parse_from_str(&self.work_day_edit.start_input, "%H:%M") {
-                        day.start_time = Some(t);
+                    match NaiveTime::parse_from_str(&self.work_day_edit.start_input, "%H:%M") {
+                        Ok(t) => day.start_time = Some(t),
+                        Err(_) => errors.push("Invalid start time"),
                     }
                 }
 
-                day.end_time = if self.work_day_edit.end_input.is_empty() {
-                    None
+                if !self.work_day_edit.end_input.is_empty() {
+                    match NaiveTime::parse_from_str(&self.work_day_edit.end_input, "%H:%M") {
+                        Ok(t) => day.end_time = Some(t),
+                        Err(_) => errors.push("Invalid end time"),
+                    }
                 } else {
-                    NaiveTime::parse_from_str(&self.work_day_edit.end_input, "%H:%M").ok()
-                };
+                    day.end_time = None;
+                }
 
+                if !errors.is_empty() {
+                    self.error_banner = Some(errors.join(", ") + " (use HH:MM)");
+                    return Task::none();
+                }
+
+                let mut break_errors = false;
                 let breaks: Vec<_> = self.work_day_edit.break_inputs.iter().filter_map(|(s, e)| {
-                    let start = NaiveTime::parse_from_str(s, "%H:%M").ok()?;
+                    let start = match NaiveTime::parse_from_str(s, "%H:%M") {
+                        Ok(t) => t,
+                        Err(_) => { break_errors = true; return None; }
+                    };
                     let end = if e.is_empty() {
                         None
                     } else {
-                        NaiveTime::parse_from_str(e, "%H:%M").ok()
+                        match NaiveTime::parse_from_str(e, "%H:%M") {
+                            Ok(t) => Some(t),
+                            Err(_) => { break_errors = true; return None; }
+                        }
                     };
                     if let Some(nd) = end {
-                        if start >= nd { return None; }
+                        if start >= nd { break_errors = true; return None; }
                     }
                     Some(crate::state::work_day::Break { start, end })
                 }).collect();
 
+                if break_errors {
+                    self.error_banner = Some("Invalid break times (use HH:MM, start < end)".into());
+                    return Task::none();
+                }
+
                 day.breaks = breaks;
 
                 self.work_day_store.set(day);
-                let _ = self.work_day_store.save(&self.settings.data_dir);
+                self.save_work_day();
                 self.work_day_edit.edit_mode = false;
                 self.work_day_edit.break_inputs.clear();
-                #[cfg(target_os = "linux")]
+                #[cfg(not(target_os = "macos"))]
                 self.sync_tray_phase();
                 Task::none()
             }

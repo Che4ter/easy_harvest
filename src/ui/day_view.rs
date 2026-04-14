@@ -30,8 +30,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
     let mut col = column![header, hours_bar, work_strip]
         .spacing(0)
-        .width(Length::Fill)
-        .height(Length::Fill);
+        .width(Length::Fill);
 
     if state.date_picker.open {
         col = col.push(date_picker_view(state));
@@ -97,11 +96,11 @@ fn date_header(state: &EasyHarvest) -> Element<'_, Message> {
     container(
         row![
             prev_btn,
-            Space::with_width(8),
+            Space::new().width(8).height(8),
             date_label,
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             lock_badge,
-            Space::with_width(8),
+            Space::new().width(8).height(8),
             next_btn,
         ]
         .align_y(Alignment::Center),
@@ -118,11 +117,11 @@ fn date_header(state: &EasyHarvest) -> Element<'_, Message> {
 /// Returns a small "Locked" or "Billed" pill if all entries for the day are locked.
 fn day_lock_badge(entries: &[crate::harvest::models::TimeEntry]) -> Element<'static, Message> {
     if entries.is_empty() {
-        return Space::with_width(0).into();
+        return Space::new().into();
     }
     let all_locked = entries.iter().all(|e| e.is_locked);
     if !all_locked {
-        return Space::with_width(0).into();
+        return Space::new().into();
     }
     let all_billed = entries.iter().all(|e| e.is_billed);
     let (label, color) = if all_billed {
@@ -166,13 +165,13 @@ fn hours_summary(state: &EasyHarvest) -> Element<'_, Message> {
 
     let bar_color = if booked >= expected { SUCCESS } else { ACCENT };
 
-    let booked_text = text(format!("{:.1}h booked", booked))
+    let booked_text = text(format!("{} booked", super::fmt_hm(booked)))
         .font(FONT_MEDIUM)
         .size(13)
         .color(TEXT_PRIMARY);
 
     let remaining_text = if remaining > 0.0 {
-        text(format!("{:.1}h remaining", remaining))
+        text(format!("{} remaining", super::fmt_hm(remaining)))
             .font(FONT_REGULAR)
             .size(12)
             .color(TEXT_MUTED)
@@ -185,7 +184,7 @@ fn hours_summary(state: &EasyHarvest) -> Element<'_, Message> {
 
     let labels = row![
         booked_text,
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         remaining_text,
     ]
     .align_y(Alignment::Center);
@@ -194,7 +193,7 @@ fn hours_summary(state: &EasyHarvest) -> Element<'_, Message> {
     let track = super::progress_bar(pct, bar_color, 6);
 
     container(
-        column![labels, Space::with_height(8), track].spacing(0),
+        column![labels, Space::new(), track].spacing(0),
     )
     .style(|_| container::Style {
         background: Some(iced::Background::Color(SURFACE)),
@@ -220,7 +219,7 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
     let phase = work_day.phase();
 
     if !is_today && phase == WorkPhase::NotStarted {
-        return Space::with_height(0).into();
+        return Space::new().into();
     }
 
     let worked_h = work_day.worked_hours(now.time());
@@ -233,7 +232,7 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
         WorkPhase::Ended      => ("Done",        TEXT_MUTED),
     };
 
-    let dot: Element<Message> = container(Space::with_width(0))
+    let dot: Element<Message> = container(Space::new())
         .style(move |_| container::Style {
             background: Some(iced::Background::Color(phase_color)),
             border: iced::Border { radius: 4.0.into(), ..Default::default() },
@@ -243,7 +242,7 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
         .into();
 
     let worked_text: Element<Message> = if phase == WorkPhase::NotStarted {
-        Space::with_width(0).into()
+        Space::new().into()
     } else {
         let h = worked_h.floor() as u32;
         let m = ((worked_h - worked_h.floor()) * 60.0).round() as u32;
@@ -258,7 +257,7 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
     let controls: Element<Message> = if in_edit {
         row![
             wd_secondary_btn("Cancel", Message::WorkDayEditCancel),
-            Space::with_width(6),
+            Space::new().width(6).height(6),
             wd_primary_btn("Save", SUCCESS, Message::WorkDayEditSave),
         ]
         .align_y(Alignment::Center)
@@ -268,7 +267,7 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
             WorkPhase::NotStarted => wd_primary_btn("Start Day", SUCCESS, Message::StartDay),
             WorkPhase::Working => row![
                 wd_secondary_btn("Start Break", Message::StartBreak),
-                Space::with_width(6),
+                Space::new().width(6).height(6),
                 wd_primary_btn("End Day", DANGER, Message::EndDay),
             ]
             .align_y(Alignment::Center)
@@ -281,12 +280,12 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
             .into(),
         }
     } else {
-        Space::with_width(0).into()
+        Space::new().into()
     };
 
     // Timeline summary shown in display mode
     let timeline_summary: Element<Message> = match work_day.start_time {
-        None => Space::with_width(0).into(),
+        None => Space::new().into(),
         Some(start) => {
             let end_part = match work_day.end_time {
                 Some(e) => e.format("%H:%M").to_string(),
@@ -320,21 +319,21 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
             })
             .into()
     } else {
-        Space::with_width(0).into()
+        Space::new().into()
     };
 
     // Status row: dot + phase + worked + [timeline] + [Edit] + controls
     let status_row: Element<Message> = row![
         dot,
-        Space::with_width(7),
+        Space::new().width(7).height(7),
         text(phase_label).font(FONT_MEDIUM).size(12).color(phase_color),
-        Space::with_width(10),
+        Space::new().width(10).height(10),
         worked_text,
-        Space::with_width(Length::Fill),
-        if in_edit { Space::with_width(0).into() } else { timeline_summary },
-        Space::with_width(6),
+        Space::new().width(Length::Fill),
+        if in_edit { Space::new().into() } else { timeline_summary },
+        Space::new().width(6).height(6),
         edit_btn,
-        Space::with_width(10),
+        Space::new().width(10).height(10),
         controls,
     ]
     .align_y(Alignment::Center)
@@ -345,7 +344,7 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
     let edit_panel: Element<Message> = if in_edit {
         work_day_edit_panel(state)
     } else {
-        Space::with_height(0).into()
+        Space::new().into()
     };
 
     // Progress bar (only while actively working/on break)
@@ -355,11 +354,11 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
     {
         let pct = (worked_h / expected).min(1.0) as f32;
         let bar_color = if worked_h >= expected { SUCCESS } else { ACCENT };
-        column![Space::with_height(6), super::progress_bar(pct, bar_color, 4)]
+        column![Space::new(), super::progress_bar(pct, bar_color, 4)]
             .spacing(0)
             .into()
     } else {
-        Space::with_height(0).into()
+        Space::new().into()
     };
 
     container(
@@ -457,7 +456,7 @@ fn work_day_edit_panel(state: &EasyHarvest) -> Element<'_, Message> {
     rows.push(add_break_btn);
 
     column![
-        Space::with_height(8),
+        Space::new(),
         column(rows).spacing(5),
     ]
     .spacing(0)
@@ -513,7 +512,7 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
     let add_btn = button(
         row![
             text("+").font(FONT_SEMIBOLD).size(16).color(Color::WHITE),
-            Space::with_width(6),
+            Space::new().width(6).height(6),
             text("Add Entry").font(FONT_MEDIUM).size(14).color(Color::WHITE),
         ]
         .align_y(Alignment::Center),
@@ -528,7 +527,7 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
                 .font(FONT_SEMIBOLD)
                 .size(14)
                 .color(TEXT_PRIMARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             add_btn,
         ]
         .align_y(Alignment::Center),
@@ -554,7 +553,7 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
                     .font(FONT_MEDIUM)
                     .size(14)
                     .color(TEXT_MUTED),
-                Space::with_height(4),
+                Space::new(),
                 text("Click + Add Entry to start tracking")
                     .font(FONT_REGULAR)
                     .size(12)
@@ -602,11 +601,11 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
     } else if entry.is_locked {
         status_badge("Locked", ACCENT)
     } else {
-        Space::with_height(0).into()
+        Space::new().into()
     };
 
     let running_dot: Element<Message> = if entry.is_running {
-        container(Space::with_width(8))
+        container(Space::new().width(8).height(8))
             .style(|_| container::Style {
                 background: Some(iced::Background::Color(SUCCESS)),
                 border: iced::Border { radius: 4.0.into(), ..Default::default() },
@@ -615,7 +614,7 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
             .width(8).height(8)
             .into()
     } else {
-        Space::with_width(0).into()
+        Space::new().into()
     };
 
     let client_project = text(format!("{} › {}", entry.client.name, entry.project.name))
@@ -627,7 +626,7 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
         Some(n) if !n.is_empty() => {
             text(n).font(FONT_REGULAR).size(12).color(TEXT_MUTED).into()
         }
-        _ => Space::with_height(0).into(),
+        _ => Space::new().into(),
     };
 
     let hours = text(super::format_hhmm(entry.hours))
@@ -642,22 +641,22 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
             .on_press(Message::TimerStart(entry.id))
             .into()
     } else {
-        Space::with_width(0).into()
+        Space::new().into()
     };
 
     // Action area — confirmation state or normal edit/delete buttons
     let locked_or_pending = entry.is_locked
         || entry.approval_status.as_deref() == Some("submitted");
     let actions: Element<Message> = if locked_or_pending {
-        Space::with_width(0).into()
+        Space::new().into()
     } else if pending_delete == Some(entry.id) {
         // Confirmation row
         row![
             text("Delete?").font(FONT_MEDIUM).size(12).color(DANGER),
-            Space::with_width(6),
+            Space::new().width(6).height(6),
             compact_ghost_btn("Cancel", TEXT_MUTED)
                 .on_press(Message::DeleteCancel),
-            Space::with_width(4),
+            Space::new().width(4).height(4),
             button(text("Confirm").font(FONT_SEMIBOLD).size(12).color(Color::WHITE))
                 .style(danger_btn_style)
                 .padding([3, 8])
@@ -668,10 +667,10 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
     } else {
         row![
             timer_btn,
-            Space::with_width(2),
+            Space::new().width(2).height(2),
             compact_ghost_btn("Edit", TEXT_MUTED)
                 .on_press(Message::EditEntry(entry.id)),
-            Space::with_width(2),
+            Space::new().width(2).height(2),
             compact_ghost_btn("Delete", DANGER)
                 .on_press(Message::DeleteRequest(entry.id)),
         ]
@@ -680,7 +679,7 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
     };
 
     let left_col = column![
-        row![running_dot, Space::with_width(4), client_project]
+        row![running_dot, Space::new().width(4).height(4), client_project]
             .align_y(Alignment::Center),
         task,
         notes,
@@ -690,9 +689,9 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
 
     let right_col = column![
         locked_indicator,
-        Space::with_height(4),
+        Space::new(),
         hours,
-        Space::with_height(4),
+        Space::new(),
         actions,
     ]
     .align_x(Alignment::End);
@@ -710,7 +709,7 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
 
 fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
     let Some(form) = state.entry_form.as_ref() else {
-        return Space::new(0, 0).into();
+        return Space::new().into();
     };
     let options = &state.cached_project_options;
 
@@ -760,7 +759,7 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
 
         column![
             caption("Quick fill from template"),
-            Space::with_height(6),
+            Space::new(),
             scrollable(row(chips).spacing(6))
                 .direction(scrollable::Direction::Horizontal(
                     scrollable::Scrollbar::new().width(2).scroller_width(2),
@@ -770,7 +769,7 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
         .spacing(0)
         .into()
     } else {
-        Space::with_height(0).into()
+        Space::new().into()
     };
 
     // Project search
@@ -826,13 +825,13 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
             .width(Length::Fill)
             .into()
     } else {
-        Space::with_height(0).into()
+        Space::new().into()
     };
 
     // Hours
     let hours_label = field_label("Hours");
     let hours_input = text_input("e.g. 2:30", &form.hours_input)
-        .id(text_input::Id::new("form_hours"))
+        .id(iced::widget::Id::new("form_hours"))
         .on_input(Message::FormHoursChanged)
         .on_submit(Message::FormFocusNotes)
         .size(14)
@@ -842,7 +841,7 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
     // Notes
     let notes_label = field_label("Notes (optional)");
     let notes_input = text_input("What did you work on?", &form.notes_input)
-        .id(text_input::Id::new("form_notes"))
+        .id(iced::widget::Id::new("form_notes"))
         .on_input(Message::FormNotesChanged)
         .on_submit(Message::FormSubmit)
         .size(14)
@@ -857,7 +856,7 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
             .color(DANGER)
             .into()
     } else {
-        Space::with_height(0).into()
+        Space::new().into()
     };
 
     // Buttons
@@ -876,25 +875,25 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
         container(
             column![
                 heading,
-                Space::with_height(16),
+                Space::new(),
                 templates_section,
-                Space::with_height(16),
+                Space::new(),
                 project_label,
-                Space::with_height(6),
+                Space::new(),
                 project_input,
                 suggestion_list,
-                Space::with_height(14),
+                Space::new(),
                 hours_label,
-                Space::with_height(6),
+                Space::new(),
                 hours_input,
-                Space::with_height(14),
+                Space::new(),
                 notes_label,
-                Space::with_height(6),
+                Space::new(),
                 notes_input,
-                Space::with_height(8),
+                Space::new(),
                 error,
-                Space::with_height(20),
-                row![cancel_btn, Space::with_width(Length::Fill), submit_btn],
+                Space::new(),
+                row![cancel_btn, Space::new().width(Length::Fill), submit_btn],
             ]
             .spacing(0),
         )
@@ -927,12 +926,12 @@ fn date_picker_view(state: &EasyHarvest) -> Element<'_, Message> {
     // Month header
     let header = row![
         ghost_btn("‹", Message::DatePickerMonthPrev),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         text(format!("{} {year}", month_name(month)))
             .font(FONT_SEMIBOLD)
             .size(15)
             .color(TEXT_PRIMARY),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         ghost_btn("›", Message::DatePickerMonthNext),
     ]
     .align_y(Alignment::Center);
@@ -958,7 +957,7 @@ fn date_picker_view(state: &EasyHarvest) -> Element<'_, Message> {
                 .map(|dow| {
                     let idx = week * 7 + dow;
                     if idx < offset || idx >= offset + days_in_month {
-                        container(Space::with_width(0))
+                        container(Space::new())
                             .width(Length::FillPortion(1))
                             .into()
                     } else {
@@ -1016,7 +1015,7 @@ fn date_picker_view(state: &EasyHarvest) -> Element<'_, Message> {
         })
         .collect();
 
-    let mut grid = column![header, Space::with_height(6), row(dow_cells), Space::with_height(2)]
+    let mut grid = column![header, Space::new(), row(dow_cells), Space::new()]
         .spacing(3);
     for wr in week_rows {
         grid = grid.push(wr);

@@ -44,9 +44,7 @@ impl ProjectCache {
     /// Load from disk.  Returns `None` if the file is missing or cannot be parsed.
     pub fn load(data_dir: &Path) -> Option<Self> {
         let path = data_dir.join("cache").join("project_assignments.json");
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+        super::io::load_json(&path)
     }
 
     /// Persist to `<data_dir>/cache/project_assignments.json`.
@@ -55,7 +53,7 @@ impl ProjectCache {
         std::fs::create_dir_all(&dir)?;
         let json = serde_json::to_string_pretty(self)
             .map_err(std::io::Error::other)?;
-        std::fs::write(dir.join("project_assignments.json"), json)
+        super::io::atomic_write(&dir.join("project_assignments.json"), &json)
     }
 }
 

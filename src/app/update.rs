@@ -93,7 +93,8 @@ impl EasyHarvest {
             | Message::SettingsDataDirChanged(_)
             | Message::SettingsPickDataDir
             | Message::SettingsDataDirPicked(_)
-            | Message::SettingsSaveDataDir => self.update_settings(message),
+            | Message::SettingsSaveDataDir
+            | Message::SettingsAutostartToggle => self.update_settings(message),
 
             // ── Vacation ──
             Message::VacationYearPrev
@@ -129,9 +130,9 @@ impl EasyHarvest {
 
             Message::TabPressed { shift } => {
                 if shift {
-                    iced::widget::focus_previous()
+                    iced::widget::operation::focus_previous()
                 } else {
-                    iced::widget::focus_next()
+                    iced::widget::operation::focus_next()
                 }
             }
 

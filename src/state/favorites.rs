@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 use crate::harvest::models::ProjectAssignment;
@@ -17,7 +16,6 @@ pub struct UsageEntry {
     /// Pinned entries always appear at the top of the project picker.
     pub is_pinned: bool,
     pub use_count: u32,
-    pub last_used_date: Option<NaiveDate>,
 }
 
 /// Usage frequency store and pin list, persisted at `<data_dir>/favorites.json`.
@@ -80,17 +78,14 @@ impl Favorites {
     /// Record a booking — increments `use_count` and sets `last_used_date` to today.
     /// Creates a new entry if none exists yet.
     pub fn record_use(&mut self, project_id: i64, task_id: i64) {
-        let today = chrono::Local::now().naive_local().date();
         if let Some(e) = self.find_mut(project_id, task_id) {
             e.use_count += 1;
-            e.last_used_date = Some(today);
         } else {
             self.entries.push(UsageEntry {
                 project_id,
                 task_id,
                 is_pinned: false,
                 use_count: 1,
-                last_used_date: Some(today),
             });
         }
     }
@@ -105,7 +100,6 @@ impl Favorites {
                 task_id,
                 is_pinned: true,
                 use_count: 0,
-                last_used_date: None,
             });
         }
     }
@@ -161,17 +155,14 @@ impl Favorites {
 
     pub fn load(data_dir: &Path) -> Self {
         let path = data_dir.join("favorites.json");
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        super::io::load_json(&path).unwrap_or_default()
     }
 
     pub fn save(&self, data_dir: &Path) -> Result<(), std::io::Error> {
         std::fs::create_dir_all(data_dir)?;
         let json = serde_json::to_string_pretty(self)
             .map_err(std::io::Error::other)?;
-        std::fs::write(data_dir.join("favorites.json"), json)
+        super::io::atomic_write(&data_dir.join("favorites.json"), &json)
     }
 }
 

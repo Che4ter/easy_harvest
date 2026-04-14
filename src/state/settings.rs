@@ -131,6 +131,11 @@ pub struct Settings {
     /// entitlement is prorated by the fraction of the year actually worked.
     #[serde(default)]
     pub first_work_day: Option<NaiveDate>,
+
+    /// Whether the app is registered to launch at login.
+    /// Synced with the OS autostart state on every load — not persisted to JSON.
+    #[serde(skip)]
+    pub autostart: bool,
 }
 
 fn default_total_weekly_hours() -> f64 {
@@ -215,6 +220,7 @@ impl Default for Settings {
             carryover: HashMap::new(),
             holiday_task_ids: Vec::new(),
             first_work_day: None,
+            autostart: false,
         }
     }
 }
@@ -230,17 +236,12 @@ impl Settings {
 
     pub fn load(data_dir: &Path) -> Self {
         let path = Self::settings_path(data_dir);
-        let mut settings = match std::fs::read_to_string(&path) {
-            Ok(contents) => serde_json::from_str(&contents).unwrap_or_else(|_| Self {
-                data_dir: data_dir.to_path_buf(),
-                ..Default::default()
-            }),
-            Err(_) => Self {
-                data_dir: data_dir.to_path_buf(),
-                ..Default::default()
-            },
-        };
+        let mut settings: Self = super::io::load_json(&path).unwrap_or_else(|| Self {
+            data_dir: data_dir.to_path_buf(),
+            ..Default::default()
+        });
         settings.data_dir = data_dir.to_path_buf();
+        settings.autostart = crate::autostart::is_enabled();
         settings
     }
 
@@ -249,7 +250,7 @@ impl Settings {
         let path = Self::settings_path(&self.data_dir);
         let json = serde_json::to_string_pretty(self)
             .map_err(std::io::Error::other)?;
-        std::fs::write(path, json)
+        super::io::atomic_write(&path, &json)
     }
 
     /// Load the API token — tries OS keyring first, falls back to a plain file.
@@ -275,7 +276,13 @@ impl Settings {
             .ok()
             .and_then(|e| e.set_password(token).ok())
             .is_some();
-        if !keyring_ok {
+        if keyring_ok {
+            // Keyring succeeded — remove any stale plaintext fallback file.
+            let path = Self::token_file_path(data_dir);
+            if path.exists() {
+                let _ = std::fs::remove_file(&path);
+            }
+        } else {
             std::fs::create_dir_all(data_dir)?;
             let path = Self::token_file_path(data_dir);
             std::fs::write(&path, token)?;

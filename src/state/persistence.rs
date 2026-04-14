@@ -40,10 +40,8 @@ impl WorkDayStore {
     /// cold-start case specially.
     pub fn load(data_dir: &Path, year: i32, month: u32) -> Self {
         let path = Self::path(data_dir, year, month);
-        let days: BTreeMap<NaiveDate, WorkDay> = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+        let days: BTreeMap<NaiveDate, WorkDay> =
+            super::io::load_json(&path).unwrap_or_default();
         Self { year, month, days }
     }
 
@@ -53,7 +51,7 @@ impl WorkDayStore {
         std::fs::create_dir_all(path.parent().expect("path has parent"))?;
         let json = serde_json::to_string_pretty(&self.days)
             .map_err(std::io::Error::other)?;
-        std::fs::write(path, json)
+        super::io::atomic_write(&path, &json)
     }
 
     /// Return the record for `date`, or `None` if no entry exists yet.

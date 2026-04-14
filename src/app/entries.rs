@@ -94,11 +94,11 @@ impl EasyHarvest {
             }
 
             Message::FormFocusHours => {
-                text_input::focus(text_input::Id::new("form_hours"))
+                iced::widget::operation::focus(iced::widget::Id::new("form_hours"))
             }
 
             Message::FormFocusNotes => {
-                text_input::focus(text_input::Id::new("form_notes"))
+                iced::widget::operation::focus(iced::widget::Id::new("form_notes"))
             }
 
             Message::FormSubmit => {

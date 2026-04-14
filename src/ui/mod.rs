@@ -11,6 +11,15 @@ use crate::app::{Message, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBO
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 
+/// Format decimal hours as `h:mm` (e.g. 6.6 → "6:36", -0.25 → "-0:15").
+pub fn fmt_hm(hours: f64) -> String {
+    let sign = if hours < 0.0 { "-" } else { "" };
+    let total_mins = (hours.abs() * 60.0).round() as u32;
+    let h = total_mins / 60;
+    let m = total_mins % 60;
+    format!("{sign}{h}:{m:02}")
+}
+
 pub fn month_name(m: u32) -> &'static str {
     match m {
         1 => "January",
@@ -96,7 +105,7 @@ pub fn input_style(
     text_input::Style {
         background: iced::Background::Color(crate::app::BACKGROUND),
         border: Border {
-            color: if matches!(status, text_input::Status::Focused) {
+            color: if matches!(status, text_input::Status::Focused { .. }) {
                 ACCENT
             } else {
                 palette.background.strong.color
@@ -168,31 +177,31 @@ pub fn progress_bar(
     let radius = (height as f32 / 2.0).into();
 
     let fill: Element<Message> = if fill_portions > 0 {
-        container(Space::with_width(0))
+        container(Space::new())
             .style(move |_: &iced::Theme| container::Style {
                 background: Some(iced::Background::Color(bar_color)),
                 border: Border { radius, ..Default::default() },
                 ..Default::default()
             })
             .width(Length::FillPortion(fill_portions))
-            .height(height)
+            .height(height as f32)
             .into()
     } else {
-        Space::with_width(Length::FillPortion(1)).into()
+        Space::new().width(Length::FillPortion(1)).height(Length::FillPortion(1)).into()
     };
 
     let empty: Element<Message> = if empty_portions > 0 {
-        container(Space::with_width(0))
+        container(Space::new())
             .style(move |_: &iced::Theme| container::Style {
                 background: Some(iced::Background::Color(SURFACE_RAISED)),
                 border: Border { radius, ..Default::default() },
                 ..Default::default()
             })
             .width(Length::FillPortion(empty_portions))
-            .height(height)
+            .height(height as f32)
             .into()
     } else {
-        Space::with_width(Length::FillPortion(1)).into()
+        Space::new().width(Length::FillPortion(1)).height(Length::FillPortion(1)).into()
     };
 
     container(row![fill, empty].spacing(0))
@@ -202,7 +211,7 @@ pub fn progress_bar(
             ..Default::default()
         })
         .width(Length::Fill)
-        .height(height)
+        .height(height as f32)
         .into()
 }
 

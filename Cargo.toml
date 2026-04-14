@@ -14,7 +14,7 @@ path = "src/main.rs"
 [dependencies]
 # Async runtime + HTTP
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls-webpki-roots"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "rustls", "webpki-roots", "query"], default-features = false }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -31,14 +31,17 @@ keyring = "3"
 dirs = "6"
 
 # UI
-iced = { version = "0.13", features = ["tokio", "image"] }
+iced = { version = "0.14", features = ["tokio", "image", "advanced"] }
 
 # Native file/folder picker dialogs
-rfd = "0.15"
+rfd = "0.17"
 
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tray-icon = { version = "0.19", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ksni = "0.3"
+gtk = "0.18"
 keyring = { version = "3", features = ["sync-secret-service"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -46,9 +49,10 @@ keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
+winreg = "0.56"
 
 [build-dependencies]
-image = { version = "0.24", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
 tempfile = "3"
