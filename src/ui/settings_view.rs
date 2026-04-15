@@ -1,6 +1,6 @@
 use chrono::{Datelike, Local};
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
-use iced::{Alignment, Color, Element, Length};
+use iced::{Alignment, Element, Length};
 
 use crate::app::{
     EasyHarvest, EntryMsg, Message, SettingsMsg, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD,
@@ -10,7 +10,7 @@ use super::{
     caption, card_style, delete_chip_btn, dropdown_container_style, field_label,
     input_style, month_abbr, nav_arrow_btn, outline_btn, outline_btn_sm,
     outline_btn_style, primary_btn, section_heading, suggestion_btn_style,
-    toggle_active_style, toggle_inactive_style, with_alpha,
+    toggle_active_style, toggle_inactive_style,
     PAGE_PADDING, SECTION_GAP, LIST_ROW_SPACING,
 };
 
@@ -163,7 +163,7 @@ fn profile_section(state: &EasyHarvest) -> Element<'_, Message> {
             Space::new().into()
         };
 
-        row![btn, Space::new().width(10).height(10), feedback]
+        row![Space::new().width(Length::Fill), btn, Space::new().width(10).height(10), feedback]
             .align_y(Alignment::Center)
             .into()
     };
@@ -223,17 +223,7 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
             let year_chip = container(
                 text(year.to_string()).font(FONT_SEMIBOLD).size(13).color(ACCENT),
             )
-            .style(|_| container::Style {
-                background: Some(iced::Background::Color(Color {
-                    r: ACCENT.r, g: ACCENT.g, b: ACCENT.b, a: 0.12,
-                })),
-                border: iced::Border {
-                    color: with_alpha(ACCENT, 0.30),
-                    width: 1.0,
-                    radius: 6.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(|_| super::accent_chip_style(0.12, 0.30))
             .padding([4, 10]);
 
             let ot_color = if c.overtime_hours >= 0.0 { SUCCESS } else { DANGER };
@@ -292,11 +282,11 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
         // Year field
         column![
             caption("Year"),
-            text_input("e.g. 2026", &state.settings_form.carryover_year_input)
+            text_input("2026", &state.settings_form.carryover_year_input)
                 .on_input(|v| Message::Settings(SettingsMsg::CarryoverYearChanged(v)))
                 .size(13).padding([7, 8]).style(input_style).width(64),
         ]
-        .spacing(4),
+        .spacing(super::FORM_FIELD_GAP),
         Space::new().width(8).height(8),
         // Holiday days field
         column![
@@ -305,7 +295,7 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
                 .on_input(|v| Message::Settings(SettingsMsg::CarryoverHolidayChanged(v)))
                 .size(13).padding([7, 8]).style(input_style).width(72),
         ]
-        .spacing(4),
+        .spacing(super::FORM_FIELD_GAP),
         Space::new().width(8).height(8),
         // OT hours field
         column![
@@ -314,7 +304,7 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
                 .on_input(|v| Message::Settings(SettingsMsg::CarryoverOvertimeChanged(v)))
                 .size(13).padding([7, 8]).style(input_style).width(72),
         ]
-        .spacing(4),
+        .spacing(super::FORM_FIELD_GAP),
         Space::new().width(12).height(12),
         // Add button aligned to bottom of fields
         column![
@@ -482,15 +472,7 @@ fn holiday_tasks_section(state: &EasyHarvest) -> Element<'_, Message> {
                 ]
                 .align_y(Alignment::Center),
             )
-            .style(|_| container::Style {
-                background: Some(iced::Background::Color(with_alpha(ACCENT, 0.10))),
-                border: iced::Border {
-                    color: with_alpha(ACCENT, 0.40),
-                    width: 1.0,
-                    radius: 6.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(|_| super::accent_chip_style(0.10, 0.40))
             .padding([5, 8])
             .width(Length::Fill)
             .into()
@@ -762,6 +744,7 @@ fn numeric_row<'a>(
             .on_input(msg)
             .size(13)
             .padding([7, 8])
+            .align_x(iced::alignment::Horizontal::Right)
             .style(input_style)
             .width(72),
         Space::new().width(8).height(8),
@@ -882,7 +865,7 @@ fn template_add_form(state: &EasyHarvest) -> Element<'_, Message> {
         error,
         save_btn,
     ]
-    .spacing(6)
+    .spacing(8)
     .into()
 }
 
@@ -891,31 +874,11 @@ fn template_add_form(state: &EasyHarvest) -> Element<'_, Message> {
 
 fn templates_section(state: &EasyHarvest) -> Element<'_, Message> {
     let header_btn: Element<Message> = if state.template_form.open {
-        button(text("Cancel").font(FONT_MEDIUM).size(12).color(TEXT_MUTED))
-            .style(|_: &iced::Theme, _| button::Style {
-                background: None,
-                text_color: TEXT_MUTED,
-                ..Default::default()
-            })
-            .padding([4, 8])
+        outline_btn_sm("Cancel")
             .on_press(Message::Settings(SettingsMsg::TemplateAddCancel))
             .into()
     } else {
-        button(text("+ Add").font(FONT_MEDIUM).size(12).color(ACCENT))
-            .style(|_: &iced::Theme, status| button::Style {
-                background: Some(iced::Background::Color(match status {
-                    button::Status::Hovered => with_alpha(ACCENT, 0.10),
-                    _ => Color::TRANSPARENT,
-                })),
-                text_color: ACCENT,
-                border: iced::Border {
-                    color: with_alpha(ACCENT, 0.35),
-                    width: 1.0,
-                    radius: 5.0.into(),
-                },
-                ..Default::default()
-            })
-            .padding([4, 10])
+        primary_btn("+ Add")
             .on_press(Message::Settings(SettingsMsg::TemplateAddOpen))
             .into()
     };

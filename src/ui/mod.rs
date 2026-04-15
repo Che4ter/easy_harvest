@@ -18,6 +18,8 @@ pub const PAGE_PADDING: Padding = Padding { top: 12.0, right: 12.0, bottom: 0.0,
 pub const SECTION_GAP: f32 = 12.0;
 /// Standard gap between list rows.
 pub const LIST_ROW_SPACING: f32 = 4.0;
+/// Spacing between a field label and its input in paired `column![label, input]` patterns.
+pub const FORM_FIELD_GAP: f32 = 4.0;
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -168,6 +170,14 @@ pub fn ghost_btn_style(
         })),
         text_color: TEXT_MUTED,
         border: Border { radius: 6.0.into(), ..Default::default() },
+        ..Default::default()
+    }
+}
+
+/// Completely transparent button — no border, no bg, no padding side-effects.
+pub fn plain_btn_style(_: &iced::Theme, _: button::Status) -> button::Style {
+    button::Style {
+        background: None,
         ..Default::default()
     }
 }
@@ -425,6 +435,19 @@ pub fn card_style_bordered(border_color: Color) -> container::Style {
             color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.20 },
             offset: iced::Vector::new(0.0, 2.0),
             blur_radius: 8.0,
+        },
+        ..Default::default()
+    }
+}
+
+/// Accent-tinted chip container — ACCENT background and border at the given opacity levels.
+pub fn accent_chip_style(bg_alpha: f32, border_alpha: f32) -> container::Style {
+    container::Style {
+        background: Some(iced::Background::Color(with_alpha(ACCENT, bg_alpha))),
+        border: Border {
+            color: with_alpha(ACCENT, border_alpha),
+            width: 1.0,
+            radius: 6.0.into(),
         },
         ..Default::default()
     }

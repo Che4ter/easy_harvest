@@ -3,7 +3,7 @@ use iced::{Alignment, Color, Element, Length};
 
 use crate::app::{
     EasyHarvest, Message, StatsMsg, DANGER, FONT_REGULAR, FONT_SEMIBOLD, SUCCESS,
-    SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY,
+    TEXT_MUTED, TEXT_PRIMARY,
 };
 use super::{
     card_style, field_label, input_style, nav_arrow_btn, outline_btn_sm, primary_btn,
@@ -299,10 +299,7 @@ fn stat_row_owned(
 
 fn divider() -> Element<'static, Message> {
     container(Space::new())
-        .style(|_| container::Style {
-            background: Some(iced::Background::Color(SURFACE_RAISED)),
-            ..Default::default()
-        })
+        .style(|_| super::raised_container_style(0.0))
         .width(Length::Fill)
         .height(1)
         .into()

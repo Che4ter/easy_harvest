@@ -7,33 +7,34 @@ A desktop app for quickly booking and reviewing time entries in [Harvest](https:
 - **Day view** — see and edit time entries for any day, with hours booked vs. expected and a live progress bar
 - **Work day tracker** — track your actual working hours with start, break, and end times
 - **Vacation** — log vacation entries in bulk across a date range (weekends and public holidays skipped automatically)
-- **Stats** — year-to-date balance, overtime, holiday days used and remaining
+- **Stats** — year-to-date balance, overtime, holiday days used and remaining; manual overtime adjustments
 - **Billable overview** — per-project billable breakdown for the year, filterable by month
+- **Project budgets** — define hour budgets across one or more projects and track usage with a live progress bar
 - **Entry templates** — save project+task+notes combinations for entries you book often (e.g. "Travel Luzern-Olten")
-- **Settings** — work profile (weekly hours, percentage, vacation days), carryover values, Swiss public holidays, and data folder
+- **Settings** — work profile (weekly hours, percentage, vacation days), carryover values, Swiss public holidays, data folder, and launch-at-startup
 
-The API token is stored in the system keyring (GNOME Keyring, KWallet, Windows Credential Manager).
+The API token is stored in the system keyring (GNOME Keyring, KWallet, Windows Credential Manager), with a plain-file fallback on headless Linux.
 
 ## Platform
 
 | OS | Status |
 |---|---|
 | Linux (X11 / Wayland with AppIndicator) | Full support, system tray icon via D-Bus SNI |
-| Windows | Supported, no system tray (app closes on window close) |
+| Windows | Full support, system tray icon in the taskbar notification area |
 | macOS | Untested |
 
 On GNOME Wayland, tray icons require the [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/) shell extension.
 
 ## Building
 
-Requires Rust (stable). No extra system libraries on Windows. On Linux, `dbus` development headers are needed for the tray:
+Requires Rust (stable). No extra system libraries on Windows. On Linux, GTK 3 and D-Bus development headers are needed for the tray:
 
 ```sh
 # Fedora / RHEL
-sudo dnf install dbus-devel
+sudo dnf install gtk3-devel dbus-devel
 
 # Ubuntu / Debian
-sudo apt install libdbus-1-dev
+sudo apt install libgtk-3-dev libdbus-1-dev
 ```
 
 Build and run:

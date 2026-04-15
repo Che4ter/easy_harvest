@@ -236,7 +236,7 @@ fn vacation_form_view<'a>(form: &VacationForm, expected_per_day: f64, state: &'a
                 .padding([8, 10])
                 .on_input(|v| Message::Vacation(VacationMsg::FromChanged(v))),
         ]
-        .spacing(4)
+        .spacing(super::FORM_FIELD_GAP)
         .width(Length::Fill),
         Space::new().width(10).height(10),
         column![
@@ -247,7 +247,7 @@ fn vacation_form_view<'a>(form: &VacationForm, expected_per_day: f64, state: &'a
                 .padding([8, 10])
                 .on_input(|v| Message::Vacation(VacationMsg::ToChanged(v))),
         ]
-        .spacing(4)
+        .spacing(super::FORM_FIELD_GAP)
         .width(Length::FillPortion(2)),
     ]
     .align_y(Alignment::End);

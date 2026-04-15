@@ -64,11 +64,7 @@ fn date_header(state: &EasyHarvest) -> Element<'_, Message> {
         button(
             text("→ Today").font(FONT_REGULAR).size(12).color(TEXT_MUTED),
         )
-        .style(|_, _| button::Style {
-            background: None,
-            text_color: TEXT_MUTED,
-            ..Default::default()
-        })
+        .style(super::plain_btn_style)
         .padding([0, 0])
         .on_press(Message::Nav(NavMsg::DateToday))
         .into()
@@ -77,11 +73,7 @@ fn date_header(state: &EasyHarvest) -> Element<'_, Message> {
     let date_btn = button(
         text(date_str).font(FONT_SEMIBOLD).size(18).color(TEXT_PRIMARY),
     )
-    .style(|_, _| button::Style {
-        background: None,
-        text_color: TEXT_PRIMARY,
-        ..Default::default()
-    })
+    .style(super::plain_btn_style)
     .padding([0, 0])
     .on_press(Message::Nav(NavMsg::DatePickerToggle));
 
