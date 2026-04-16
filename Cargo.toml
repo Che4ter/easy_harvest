@@ -14,7 +14,7 @@ path = "src/main.rs"
 [dependencies]
 # Async runtime + HTTP
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-reqwest = { version = "0.13", features = ["json", "rustls", "webpki-roots", "query"], default-features = false }
+reqwest = { version = "0.13.2", features = ["json", "rustls", "query"], default-features = false }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -50,7 +50,7 @@ keyring = { version = "3", features = ["apple-native"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
 winreg = "0.56"
-windows-sys = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [package.metadata.bundle]
 name = "Easy Harvest"

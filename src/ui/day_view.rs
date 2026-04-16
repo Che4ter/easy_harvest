@@ -157,8 +157,8 @@ fn hours_summary(state: &EasyHarvest) -> Element<'_, Message> {
 
     // How many worked hours have not yet been entered in Harvest.
     let unbooked_worked = (worked_h - booked).max(0.0);
-    // How much overtime is booked relative to the daily target.
-    let overtime = (booked - expected).max(0.0);
+    // How much is booked beyond what was actually worked locally.
+    let overtime = (booked - worked_h).max(0.0);
     // Bar target: you need to book at least `expected`, or all worked time if longer.
     let target = worked_h.max(expected);
 
