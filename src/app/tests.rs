@@ -98,6 +98,16 @@ fn validate_profile_bad_date() {
     assert!(f.validate_profile().is_err());
 }
 
+#[test]
+fn validate_profile_max_weekly_hours() {
+    // 168h/week is the maximum valid value (24h × 7 days).
+    let f = profile_form("168", "100", "0", "");
+    assert!(f.validate_profile().is_ok());
+    // One over the limit must be rejected.
+    let f = profile_form("168.01", "100", "0", "");
+    assert!(f.validate_profile().is_err());
+}
+
 // ── validate_carryover tests ────────────────────────────────────────────────
 
 fn carryover_form(year: &str, holiday: &str, overtime: &str) -> SettingsFormState {
@@ -111,10 +121,10 @@ fn carryover_form(year: &str, holiday: &str, overtime: &str) -> SettingsFormStat
 
 #[test]
 fn validate_carryover_valid() {
-    let f = carryover_form("2025", "3,5", "-10,2");
+    let f = carryover_form("2025", "16,5", "-10,2");
     let c = f.validate_carryover().unwrap();
     assert_eq!(c.year, 2025);
-    assert!((c.holiday_days - 3.5).abs() < f64::EPSILON);
+    assert!((c.holiday_hours - 16.5).abs() < f64::EPSILON);
     assert!((c.overtime_hours - (-10.2)).abs() < f64::EPSILON);
 }
 
@@ -132,6 +142,16 @@ fn validate_carryover_bad_hours() {
     assert!(f.validate_carryover().is_err());
     let f = carryover_form("2025", "5", "xyz");
     assert!(f.validate_carryover().is_err());
+}
+
+#[test]
+fn validate_carryover_year_boundaries() {
+    // 2000 and 2100 are both within the valid range.
+    assert!(carryover_form("2000", "0", "0").validate_carryover().is_ok());
+    assert!(carryover_form("2100", "0", "0").validate_carryover().is_ok());
+    // One outside each boundary must be rejected.
+    assert!(carryover_form("1999", "0", "0").validate_carryover().is_err());
+    assert!(carryover_form("2101", "0", "0").validate_carryover().is_err());
 }
 
 // ── compute_budget_summaries tests ─────────────────────────────────────────
@@ -242,6 +262,26 @@ fn budget_summary_multiple_budgets() {
     assert!((summaries[0].used_hours - 10.0).abs() < f64::EPSILON);
     assert!((summaries[1].used_hours - 25.0).abs() < f64::EPSILON);
     assert!((summaries[1].pct_used - 0.5).abs() < f64::EPSILON);
+}
+
+#[test]
+fn adj_form_validate_year_boundary_dates() {
+    // Jan 1 and Dec 31 of the target year must both be accepted.
+    let jan1 = OvertimeAdjustmentForm {
+        date_input: "01.01.2025".into(),
+        hours_input: "4".into(),
+        reason_input: "Test".into(),
+        ..Default::default()
+    };
+    assert!(jan1.validate(2025).is_ok());
+
+    let dec31 = OvertimeAdjustmentForm {
+        date_input: "31.12.2025".into(),
+        hours_input: "4".into(),
+        reason_input: "Test".into(),
+        ..Default::default()
+    };
+    assert!(dec31.validate(2025).is_ok());
 }
 
 // ── BudgetForm::validate tests ─────────────────────────────────────────────

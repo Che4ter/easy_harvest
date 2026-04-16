@@ -1,4 +1,5 @@
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 
 use super::models::*;
 
@@ -17,27 +18,36 @@ pub enum HarvestError {
 #[derive(Clone)]
 pub struct HarvestClient {
     http: Client,
-    token: String,
-    account_id: String,
 }
 
 impl HarvestClient {
     pub fn new(token: String, account_id: String) -> Result<Self, reqwest::Error> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}"))
+                .expect("token contains only ASCII"),
+        );
+        headers.insert(
+            "Harvest-Account-Id",
+            HeaderValue::from_str(&account_id)
+                .expect("account_id contains only ASCII"),
+        );
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static(concat!("EasyHarvest/", env!("CARGO_PKG_VERSION"))),
+        );
         Ok(Self {
             http: Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
+                .default_headers(headers)
                 .build()?,
-            token,
-            account_id,
         })
     }
 
     fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
         self.http
             .request(method, format!("https://api.harvestapp.com/v2{path}"))
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Harvest-Account-Id", &self.account_id)
-            .header("User-Agent", concat!("EasyHarvest/", env!("CARGO_PKG_VERSION")))
     }
 
     async fn check_response(
@@ -79,13 +89,17 @@ impl HarvestClient {
             let resp = build().send().await?;
             match Self::check_response(resp).await {
                 Ok(resp) => return Ok(resp),
+                // Sleep and retry only when retries remain.
                 Err(HarvestError::RateLimited { retry_after_secs }) if attempt < MAX_RETRIES => {
                     tokio::time::sleep(std::time::Duration::from_secs(retry_after_secs)).await;
                 }
+                // On the final attempt the guard above is false, so RateLimited
+                // falls here and is returned as-is — the loop always exits via
+                // one of the two `return` arms, never by running out of iterations.
                 Err(e) => return Err(e),
             }
         }
-        unreachable!()
+        unreachable!("loop exits via return on every iteration")
     }
 
     // --- User ---

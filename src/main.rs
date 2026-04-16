@@ -7,5 +7,12 @@ fn main() -> iced::Result {
     // the Easy Harvest icon.  No-op on non-Linux platforms.
     easy_harvest::autostart::install_icon();
 
+    // Re-register the autostart entry with the current executable path so the
+    // registry key stays correct if the binary is ever renamed or moved.
+    #[cfg(target_os = "windows")]
+    if easy_harvest::autostart::is_enabled() {
+        let _ = easy_harvest::autostart::enable();
+    }
+
     app::run()
 }

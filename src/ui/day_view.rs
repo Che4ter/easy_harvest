@@ -6,7 +6,7 @@ use iced::{Alignment, Color, Element, Length, Padding};
 
 use crate::app::{
     EasyHarvest, EntryMsg, Message, NavMsg, WorkDayMsg, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR,
-    FONT_SEMIBOLD, SUCCESS, SURFACE, SURFACE_HOVER, SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY,
+    FONT_SEMIBOLD, SUCCESS, SURFACE, SURFACE_HOVER, SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY, WARNING,
 };
 use crate::harvest::models::TimeEntry;
 use crate::state::favorites::ProjectOption;
@@ -15,8 +15,8 @@ use crate::state::work_day::WorkPhase;
 use super::{
     caption, compact_ghost_btn, danger_btn_style, dropdown_container_style,
     field_label, ghost_btn_lg, list_row_style, month_name,
-    nav_arrow_btn, primary_btn_lg, section_heading, suggestion_btn_style, with_alpha,
-    LIST_ROW_SPACING,
+    nav_arrow_btn, primary_btn_lg, progress_bar_with_marker, section_heading,
+    suggestion_btn_style, with_alpha, LIST_ROW_SPACING,
 };
 
 pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
@@ -148,45 +148,75 @@ fn day_lock_badge(entries: &[crate::harvest::models::TimeEntry]) -> Element<'sta
 fn hours_summary(state: &EasyHarvest) -> Element<'_, Message> {
     let booked: f64 = state.entries.iter().map(|e| e.hours).sum();
     let expected = state.cached_expected_hours;
-    let remaining = (expected - booked).max(0.0);
 
-    let pct = if expected > 0.0 {
-        (booked / expected).min(1.0) as f32
+    // Drive the bar off the work day tracker so it reflects actual time at desk.
+    let now = Local::now().naive_local();
+    let work_day = state.work_day_store.get_or_default(state.current_date);
+    let worked_h = work_day.worked_hours(now.time());
+    let phase = work_day.phase();
+
+    // How many worked hours have not yet been entered in Harvest.
+    let unbooked_worked = (worked_h - booked).max(0.0);
+    // How much overtime is booked relative to the daily target.
+    let overtime = (booked - expected).max(0.0);
+    // Bar target: you need to book at least `expected`, or all worked time if longer.
+    let target = worked_h.max(expected);
+
+    let pct = if target > 0.0 {
+        (booked / target).min(1.0) as f32
     } else {
         1.0
     };
 
-    let bar_color = if booked >= expected { SUCCESS } else { ACCENT };
-
-    let booked_text = text(format!("{} booked", super::fmt_hm(booked)))
-        .font(FONT_MEDIUM)
-        .size(13)
-        .color(TEXT_PRIMARY);
-
-    let remaining_text = if remaining > 0.0 {
-        text(format!("{} remaining", super::fmt_hm(remaining)))
-            .font(FONT_REGULAR)
-            .size(12)
-            .color(TEXT_MUTED)
+    // Red → amber → green as booking progresses.
+    let bar_color = if pct >= 1.0 {
+        SUCCESS
+    } else if pct >= 0.9 {
+        WARNING
     } else {
-        text("Done for today!".to_string())
-            .font(FONT_MEDIUM)
-            .size(12)
-            .color(SUCCESS)
+        DANGER
+    };
+
+    // Tick on the bar at the expected-hours threshold so the user can see
+    // where their daily target sits relative to total worked time.
+    let marker_pct = if target > 0.0 { (expected / target).min(1.0) as f32 } else { 1.0 };
+
+    // Left label: how long you've actually been working.
+    let worked_label = if phase == WorkPhase::NotStarted {
+        text("Not started".to_string())
+            .font(FONT_REGULAR).size(13).color(TEXT_MUTED)
+    } else {
+        text(format!("{} worked", super::fmt_hm(worked_h)))
+            .font(FONT_MEDIUM).size(13).color(TEXT_PRIMARY)
+    };
+
+    // Right label: purely compares booked against worked time.
+    //  · booked < worked  → red   "X:XX to book"      (under-booked)
+    //  · booked ≈ worked  → green "All hours booked"   (exact match)
+    //  · booked > worked  → amber "X:XX overbooked"    (over-booked)
+    // When the day hasn't started yet and nothing is booked, stay silent.
+    let right_label = if phase == WorkPhase::NotStarted && booked < 0.01 {
+        text(String::new()).size(12)
+    } else if unbooked_worked > 0.01 {
+        text(format!("{} to book", super::fmt_hm(unbooked_worked)))
+            .font(FONT_MEDIUM).size(12).color(DANGER)
+    } else if overtime > 0.01 {
+        text(format!("{} overbooked", super::fmt_hm(overtime)))
+            .font(FONT_MEDIUM).size(12).color(WARNING)
+    } else {
+        text("All hours booked".to_string())
+            .font(FONT_MEDIUM).size(12).color(SUCCESS)
     };
 
     let labels = row![
-        booked_text,
+        worked_label,
         Space::new().width(Length::Fill),
-        remaining_text,
+        right_label,
     ]
     .align_y(Alignment::Center);
 
-    // Progress bar
-    let track = super::progress_bar(pct, bar_color, 6);
-
     container(
-        column![labels, track].spacing(6),
+        column![labels, progress_bar_with_marker(pct, bar_color, marker_pct, 6)].spacing(6),
     )
     .style(super::strip_style)
     .padding([8, 12])
@@ -207,9 +237,6 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
         return Space::new().into();
     }
 
-    let worked_h = work_day.worked_hours(now.time());
-    let expected = state.settings.expected_hours_per_day();
-
     let (phase_label, phase_color) = match phase {
         WorkPhase::NotStarted => ("Not started", TEXT_MUTED),
         WorkPhase::Working    => ("Working",     SUCCESS),
@@ -226,17 +253,12 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
         .width(8).height(8)
         .into();
 
-    let worked_text: Element<Message> = if phase == WorkPhase::NotStarted {
-        Space::new().into()
-    } else {
-        let h = worked_h.floor() as u32;
-        let m = ((worked_h - worked_h.floor()) * 60.0).round() as u32;
-        text(format!("{h}:{m:02}")).font(FONT_SEMIBOLD).size(13).color(TEXT_PRIMARY).into()
-    };
+    // Time label removed — the hours_summary bar above already shows the worked time.
 
     // ── Build the strip content depending on edit mode ────────────────────────
 
-    let in_edit = state.work_day_edit.edit_mode && is_today;
+    // Edit mode works for both today and past days.
+    let in_edit = state.work_day_edit.edit_mode;
 
     // Right-side controls for the status row
     let controls: Element<Message> = if in_edit {
@@ -288,8 +310,8 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
         }
     };
 
-    // "Edit" button — only shown in display mode after the day has started
-    let edit_btn: Element<Message> = if !in_edit && is_today && phase != WorkPhase::NotStarted {
+    // "Edit" button — shown in display mode for any day (today or past) that has data.
+    let edit_btn: Element<Message> = if !in_edit && phase != WorkPhase::NotStarted {
         button(text("Edit").font(FONT_MEDIUM).size(12).color(TEXT_MUTED))
             .on_press(Message::WorkDay(WorkDayMsg::EditStart))
             .padding([1, 6])
@@ -307,13 +329,11 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
         Space::new().into()
     };
 
-    // Status row: dot + phase + worked + [timeline] + [Edit] + controls
+    // Status row: dot + phase + [timeline] + [Edit] + controls
     let status_row: Element<Message> = row![
         dot,
         Space::new().width(7).height(7),
         text(phase_label).font(FONT_MEDIUM).size(12).color(phase_color),
-        Space::new().width(10).height(10),
-        worked_text,
         Space::new().width(Length::Fill),
         if in_edit { Space::new().into() } else { timeline_summary },
         Space::new().width(6).height(6),
@@ -332,22 +352,8 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
         Space::new().into()
     };
 
-    // Progress bar (only while actively working/on break)
-    let bar: Element<Message> = if !in_edit
-        && matches!(phase, WorkPhase::Working | WorkPhase::OnBreak)
-        && expected > 0.0
-    {
-        let pct = (worked_h / expected).min(1.0) as f32;
-        let bar_color = if worked_h >= expected { SUCCESS } else { ACCENT };
-        column![Space::new().height(4), super::progress_bar(pct, bar_color, 4)]
-            .spacing(0)
-            .into()
-    } else {
-        Space::new().into()
-    };
-
     container(
-        column![status_row, edit_panel, bar].spacing(0),
+        column![status_row, edit_panel].spacing(0),
     )
     .style(super::strip_style)
     .padding([8, 12])
@@ -793,7 +799,48 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
     };
 
     // Hours
-    let hours_label = field_label("Hours");
+    // Compute how much time is still unaccounted for so we can offer a quick-fill.
+    let booked_total: f64 = state.entries.iter().map(|e| e.hours).sum();
+    let editing_hours = form
+        .editing_id
+        .and_then(|id| state.entries.iter().find(|e| e.id == id))
+        .map(|e| e.hours)
+        .unwrap_or(0.0);
+    let worked_h_now = state
+        .work_day_store
+        .get_or_default(state.current_date)
+        .worked_hours(Local::now().naive_local().time());
+    let fill_target = worked_h_now.max(state.cached_expected_hours);
+    let fill_remaining = (fill_target - (booked_total - editing_hours)).max(0.0);
+
+    let hours_label: Element<Message> = if fill_remaining > 0.01 {
+        {
+            let fill_btn: Element<Message> = button(
+                text(format!("Fill {}", super::fmt_hm(fill_remaining)))
+                    .font(FONT_MEDIUM).size(11).color(ACCENT),
+            )
+            .on_press(Message::Entry(Box::new(EntryMsg::FillRemaining)))
+            .padding([2, 8])
+            .style(|_: &iced::Theme, status| button::Style {
+                background: Some(iced::Background::Color(match status {
+                    button::Status::Hovered => with_alpha(ACCENT, 0.15),
+                    _ => with_alpha(ACCENT, 0.07),
+                })),
+                border: iced::Border {
+                    color: with_alpha(ACCENT, 0.3),
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .into();
+            row![field_label("Hours"), Space::new().width(Length::Fill), fill_btn]
+                .align_y(Alignment::Center)
+                .into()
+        }
+    } else {
+        field_label("Hours")
+    };
     let hours_input = text_input("e.g. 2:30", &form.hours_input)
         .id(iced::widget::Id::new("form_hours"))
         .on_input(|v| Message::Entry(Box::new(EntryMsg::HoursChanged(v))))

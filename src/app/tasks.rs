@@ -104,7 +104,15 @@ impl EasyHarvest {
                     total_holiday_days,
                     expected_per_day,
                 );
-                Ok((balance, holidays))
+                let months = crate::stats::month_summaries(
+                    &all_entries,
+                    year,
+                    effective_start,
+                    expected_per_day,
+                    &public_holidays,
+                    balance_end,
+                );
+                Ok((balance, holidays, months))
             },
             move |result| Message::Stats(StatsMsg::Loaded(gen, result)),
         )
@@ -137,14 +145,17 @@ impl EasyHarvest {
         let (from, to) = match self.billable.month {
             None => (format!("{year}-01-01"), format!("{year}-12-31")),
             Some(m) => {
-                let first = NaiveDate::from_ymd_opt(year, m, 1).expect("valid month 1-12");
+                let first = NaiveDate::from_ymd_opt(year, m, 1)
+                    .expect("month is 1-12, enforced by UI month picker");
                 let last = if m == 12 {
-                    NaiveDate::from_ymd_opt(year + 1, 1, 1).expect("next year valid")
+                    NaiveDate::from_ymd_opt(year + 1, 1, 1)
+                        .expect("year+1 is always a valid year")
                 } else {
-                    NaiveDate::from_ymd_opt(year, m + 1, 1).expect("valid month+1")
+                    NaiveDate::from_ymd_opt(year, m + 1, 1)
+                        .expect("month+1 is 2-12, always valid")
                 }
                 .pred_opt()
-                .expect("1st of month always has a predecessor");
+                .expect("Jan 1 of any year always has a predecessor");
                 (first.format("%Y-%m-%d").to_string(), last.format("%Y-%m-%d").to_string())
             }
         };
@@ -234,27 +245,19 @@ impl EasyHarvest {
         let today = chrono::Local::now().naive_local().date();
         let year = self.vacation.year;
 
+        // Single pass: parse the date once per entry and bucket into used vs booked.
         let entries = &self.vacation.entries;
-        let used_days: f64 = entries
+        let (used_days, booked_days) = entries
             .iter()
             .filter(|e| task_ids.contains(&e.task.id))
-            .filter(|e| {
+            .filter_map(|e| {
                 NaiveDate::parse_from_str(&e.spent_date, "%Y-%m-%d")
-                    .map(|d| d <= today)
-                    .unwrap_or(false)
+                    .ok()
+                    .map(|d| (d, e.hours / expected_per_day))
             })
-            .map(|e| e.hours / expected_per_day)
-            .sum();
-        let booked_days: f64 = entries
-            .iter()
-            .filter(|e| task_ids.contains(&e.task.id))
-            .filter(|e| {
-                NaiveDate::parse_from_str(&e.spent_date, "%Y-%m-%d")
-                    .map(|d| d > today)
-                    .unwrap_or(false)
-            })
-            .map(|e| e.hours / expected_per_day)
-            .sum();
+            .fold((0.0_f64, 0.0_f64), |(used, booked), (d, days)| {
+                if d <= today { (used + days, booked) } else { (used, booked + days) }
+            });
 
         let total_days = self.settings.effective_holiday_days_for(year);
         let days_remaining = total_days - used_days - booked_days;

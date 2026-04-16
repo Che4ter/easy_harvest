@@ -89,12 +89,16 @@ impl EasyHarvest {
             WorkDayMsg::Resume => {
                 let now = Local::now().naive_local();
                 let mut day = self.work_day_store.get_or_default(now.date());
-                // Record the "off" gap as a break so worked hours stay accurate.
+                // Record the gap as a break only when the stored end time is
+                // genuinely in the past — a manually entered future end time
+                // would produce an inverted break (start > end).
                 if let Some(ended_at) = day.end_time {
-                    day.breaks.push(crate::state::work_day::Break {
-                        start: ended_at,
-                        end: Some(now.time()),
-                    });
+                    if ended_at < now.time() {
+                        day.breaks.push(crate::state::work_day::Break {
+                            start: ended_at,
+                            end: Some(now.time()),
+                        });
+                    }
                 }
                 day.end_time = None;
                 self.work_day_store.set(day);
@@ -178,6 +182,8 @@ impl EasyHarvest {
                         Ok(t) => day.start_time = Some(t),
                         Err(_) => errors.push("Invalid start time"),
                     }
+                } else {
+                    day.start_time = None;
                 }
 
                 if !self.work_day_edit.end_input.is_empty() {
@@ -217,7 +223,9 @@ impl EasyHarvest {
                         }
                     };
                     if let Some(nd) = end {
-                        if start >= nd { break_errors = true; return None; }
+                        // Zero-duration break (start == end): silently drop rather than error.
+                        if start == nd { return None; }
+                        if start > nd { break_errors = true; return None; }
                     }
                     Some(crate::state::work_day::Break { start, end })
                 }).collect();

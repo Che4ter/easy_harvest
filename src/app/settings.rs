@@ -66,11 +66,11 @@ impl SettingsFormState {
             .ok()
             .filter(|y: &i32| (2000..=2100).contains(y))
             .ok_or_else(|| "Invalid year (2000\u{2013}2100)".to_string())?;
-        let holiday_days: f64 = self.carryover_holiday_input.replace(',', ".").parse()
-            .map_err(|_| "Invalid holiday days".to_string())?;
+        let holiday_hours: f64 = self.carryover_holiday_input.replace(',', ".").parse()
+            .map_err(|_| "Invalid vacation hours".to_string())?;
         let overtime_hours: f64 = self.carryover_overtime_input.replace(',', ".").parse()
             .map_err(|_| "Invalid overtime hours".to_string())?;
-        Ok(ValidatedCarryover { year, holiday_days, overtime_hours })
+        Ok(ValidatedCarryover { year, holiday_hours, overtime_hours })
     }
 }
 
@@ -83,7 +83,7 @@ pub struct ValidatedProfile {
 
 pub struct ValidatedCarryover {
     pub year: i32,
-    pub holiday_days: f64,
+    pub holiday_hours: f64,
     pub overtime_hours: f64,
 }
 
@@ -163,9 +163,10 @@ impl EasyHarvest {
                 self.assignments.shrink_to_fit();
                 self.entries.clear();
                 self.entries.shrink_to_fit();
-                self.vacation = VacationPageState::default();
-                self.billable = BillablePageState::default();
-                self.project_tracking = ProjectTrackingPageState::default();
+                let cur_year = chrono::Local::now().naive_local().year();
+                self.vacation = VacationPageState::new(cur_year);
+                self.billable = BillablePageState::new(cur_year);
+                self.project_tracking = ProjectTrackingPageState::new(&self.settings.data_dir, cur_year);
                 self.template_form = TemplateFormState::default();
                 self.year_balance = None;
                 self.holiday_stats = None;
@@ -338,8 +339,9 @@ impl EasyHarvest {
                         return Task::none();
                     }
                 };
+                let epd = self.settings.expected_hours_per_day();
                 self.settings.carryover.insert(validated.year, crate::state::settings::YearCarryover {
-                    holiday_days: validated.holiday_days,
+                    holiday_days: if epd > 0.0 { validated.holiday_hours / epd } else { 0.0 },
                     overtime_hours: validated.overtime_hours,
                 });
                 match self.settings.save() {
@@ -536,11 +538,20 @@ impl EasyHarvest {
                 if let Err(e) = (BootstrapConfig { data_dir: new_dir.clone() }).save() {
                     self.error_banner = Some(format!("Failed to save bootstrap config: {e}"));
                 }
-                // Copy token file to new location
+                // Copy token to new location.
                 if let Some(token) = Settings::load_token(&self.settings.data_dir) {
                     if let Err(e) = Settings::save_token(&token, &new_dir) {
                         self.error_banner = Some(format!("Failed to copy token: {e}"));
                     }
+                }
+                // Copy all other data files so the folder change is non-destructive.
+                let old_dir = self.settings.data_dir.clone();
+                let migrate_errors = migrate_data_files(&old_dir, &new_dir);
+                if !migrate_errors.is_empty() {
+                    self.error_banner = Some(format!(
+                        "Data folder migration: some files could not be copied — {}",
+                        migrate_errors.join("; ")
+                    ));
                 }
                 // Move to new data dir
                 self.settings.data_dir = new_dir.clone();
@@ -597,3 +608,76 @@ impl EasyHarvest {
         }
     }
 }
+
+// ── Data-folder migration helper ──────────────────────────────────────────────
+
+/// Copy all known data files from `old_dir` to `new_dir` so that a folder
+/// change is non-destructive.  Files that do not exist in the old location are
+/// skipped silently.  Existing files in `new_dir` are overwritten so the old
+/// data always wins.
+///
+/// Returns a list of human-readable error strings for any file that could not
+/// be copied so the caller can surface them to the user.
+fn migrate_data_files(
+    old_dir: &std::path::Path,
+    new_dir: &std::path::Path,
+) -> Vec<String> {
+    let mut errors: Vec<String> = Vec::new();
+
+    let files = [
+        "favorites.json",
+        "templates.json",
+        "overtime_adjustments.json",
+        "project_budgets.json",
+    ];
+    for name in &files {
+        let src = old_dir.join(name);
+        if src.exists() {
+            if let Err(e) = std::fs::copy(&src, new_dir.join(name)) {
+                errors.push(format!("{name}: {e}"));
+            }
+        }
+    }
+
+    // Copy the work_days/ directory recursively.
+    let src_wd = old_dir.join("work_days");
+    if src_wd.is_dir() {
+        let dst_wd = new_dir.join("work_days");
+        if let Err(e) = std::fs::create_dir_all(&dst_wd) {
+            errors.push(format!("work_days/ (mkdir): {e}"));
+        } else if let Ok(entries) = std::fs::read_dir(&src_wd) {
+            for entry in entries.flatten() {
+                let src_file = entry.path();
+                if src_file.is_file() {
+                    if let Some(name) = src_file.file_name() {
+                        if let Err(e) = std::fs::copy(&src_file, dst_wd.join(name)) {
+                            errors.push(format!("work_days/{}: {e}", name.to_string_lossy()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Copy the cache/ directory — best-effort, not reported as error since it
+    // is just a download cache that will be refreshed on next API call.
+    let src_cache = old_dir.join("cache");
+    if src_cache.is_dir() {
+        let dst_cache = new_dir.join("cache");
+        if std::fs::create_dir_all(&dst_cache).is_ok() {
+            if let Ok(entries) = std::fs::read_dir(&src_cache) {
+                for entry in entries.flatten() {
+                    let src_file = entry.path();
+                    if src_file.is_file() {
+                        if let Some(name) = src_file.file_name() {
+                            let _ = std::fs::copy(&src_file, dst_cache.join(name));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    errors
+}
+

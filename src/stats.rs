@@ -35,6 +35,15 @@ pub struct HolidayStats {
     pub total_days: f64,
 }
 
+/// Aggregated stats for a single calendar month.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MonthSummary {
+    pub month: u32,
+    pub total_hours: f64,
+    pub expected_hours: f64,
+    pub balance_hours: f64,
+}
+
 /// Hours summary for a single day.
 #[derive(Debug, Clone)]
 pub struct DailySummary {
@@ -169,6 +178,42 @@ pub fn year_to_date_balance(
         total_balance: carryover_hours + period.balance_hours + manual_adjustments_hours,
         period,
     }
+}
+
+/// Per-month breakdown for all 12 months of `year`.
+///
+/// `effective_start` mirrors the same parameter in `year_to_date_balance`: when
+/// set to a date within `year`, months before that date have their `from` clamped
+/// forward so no expected hours are counted for days before employment started.
+///
+/// Months entirely in the future (after `as_of`) will have `expected_hours = 0`
+/// but still reflect any entries that were booked early.
+pub fn month_summaries(
+    entries: &[TimeEntry],
+    year: i32,
+    effective_start: Option<NaiveDate>,
+    expected_hours_per_day: f64,
+    public_holidays: &[PublicHoliday],
+    as_of: NaiveDate,
+) -> Vec<MonthSummary> {
+    (1..=12)
+        .map(|month| {
+            let (month_start, to) = month_bounds(year, month);
+            // Clamp `from` to effective_start so months before employment don't
+            // accumulate expected hours.
+            let from = match effective_start {
+                Some(start) if start > month_start => start,
+                _ => month_start,
+            };
+            let stats = period_stats(entries, from, to, expected_hours_per_day, public_holidays, as_of);
+            MonthSummary {
+                month,
+                total_hours: stats.total_hours,
+                expected_hours: stats.expected_hours,
+                balance_hours: stats.balance_hours,
+            }
+        })
+        .collect()
 }
 
 /// Group entries by date and return sorted daily summaries.
@@ -715,6 +760,137 @@ mod tests {
         let (start, end) = month_bounds(2025, 12);
         assert_eq!(start, NaiveDate::from_ymd_opt(2025, 12, 1).unwrap());
         assert_eq!(end, NaiveDate::from_ymd_opt(2025, 12, 31).unwrap());
+    }
+
+    // --- month_summaries ---
+
+    #[test]
+    fn test_month_summaries_returns_12_months() {
+        let summaries = month_summaries(&[], 2025, None, 8.0, &[], far_future());
+        assert_eq!(summaries.len(), 12);
+        assert_eq!(summaries[0].month, 1);
+        assert_eq!(summaries[11].month, 12);
+    }
+
+    #[test]
+    fn test_month_summaries_totals_per_month() {
+        let entries = vec![
+            entry("2025-01-06", 8.0, 1, false),
+            entry("2025-01-07", 6.5, 1, false),
+            entry("2025-03-03", 7.0, 1, false),
+        ];
+        let summaries = month_summaries(&entries, 2025, None, 8.0, &[], far_future());
+
+        assert!((summaries[0].total_hours - 14.5).abs() < 1e-9); // January
+        assert!((summaries[1].total_hours - 0.0).abs() < 1e-9);  // February
+        assert!((summaries[2].total_hours - 7.0).abs() < 1e-9);  // March
+    }
+
+    #[test]
+    fn test_month_summaries_balance_correct() {
+        // January 2025: 23 working days × 8h = 184h expected
+        let entries: Vec<_> = (1..=23u32)
+            .map(|i| entry(&format!("2025-01-{:02}", i + 5), 8.0, 1, false))
+            .collect();
+        // Just book exactly one day (8h) and check balance = 8 - 184 = -176
+        let single = vec![entry("2025-01-06", 8.0, 1, false)];
+        let summaries = month_summaries(&single, 2025, None, 8.0, &[], far_future());
+        let jan = &summaries[0];
+        assert!((jan.total_hours - 8.0).abs() < 1e-9);
+        assert!((jan.expected_hours - 184.0).abs() < 1e-9); // 23 days × 8h
+        assert!((jan.balance_hours - (8.0 - 184.0)).abs() < 1e-9);
+        let _ = entries; // silence unused warning
+    }
+
+    #[test]
+    fn test_month_summaries_future_months_have_zero_expected() {
+        // as_of = end of January: February onwards should have 0 expected hours.
+        let as_of = NaiveDate::from_ymd_opt(2025, 1, 31).unwrap();
+        let summaries = month_summaries(&[], 2025, None, 8.0, &[], as_of);
+
+        // January has working days up to as_of
+        assert!(summaries[0].expected_hours > 0.0);
+        // February and beyond: as_of < Feb start → 0 expected
+        for m in &summaries[1..] {
+            assert_eq!(m.expected_hours, 0.0, "month {} should have 0 expected", m.month);
+        }
+    }
+
+    #[test]
+    fn test_month_summaries_holiday_reduces_expected() {
+        // Jan 1 2025 is a Wednesday — public holiday reduces January expected by 8h.
+        let holidays = vec![PublicHoliday {
+            date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+            name: "New Year".into(),
+            half_day: false,
+        }];
+        let summaries = month_summaries(&[], 2025, None, 8.0, &holidays, far_future());
+        let jan = &summaries[0];
+        // 23 working days × 8h − 8h holiday = 176h
+        assert!((jan.expected_hours - 176.0).abs() < 1e-9);
+        // February unaffected
+        let feb = &summaries[1];
+        assert!((feb.expected_hours - 160.0).abs() < 1e-9); // 20 working days × 8h
+    }
+
+    #[test]
+    fn test_month_summaries_entries_outside_year_ignored() {
+        let entries = vec![
+            entry("2024-12-31", 8.0, 1, false), // previous year
+            entry("2026-01-02", 8.0, 1, false), // next year
+            entry("2025-06-02", 5.0, 1, false), // correct year
+        ];
+        let summaries = month_summaries(&entries, 2025, None, 8.0, &[], far_future());
+        let total: f64 = summaries.iter().map(|m| m.total_hours).sum();
+        assert!((total - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_month_summaries_balance_equals_total_minus_expected() {
+        let entries = vec![
+            entry("2025-04-07", 10.0, 1, false),
+            entry("2025-04-08", 10.0, 1, false),
+        ];
+        let summaries = month_summaries(&entries, 2025, None, 8.0, &[], far_future());
+        let apr = &summaries[3];
+        assert!((apr.balance_hours - (apr.total_hours - apr.expected_hours)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_month_summaries_effective_start_clamps_expected() {
+        // Employee starts June 15 — Jan–May should have 0 expected hours.
+        let start = NaiveDate::from_ymd_opt(2025, 6, 15).unwrap();
+        let summaries = month_summaries(&[], 2025, Some(start), 8.0, &[], far_future());
+
+        // Months before June: 0 expected hours
+        for m in &summaries[..5] {
+            assert_eq!(m.expected_hours, 0.0, "month {} before start should have 0 expected", m.month);
+        }
+        // June: only days from the 15th count, so fewer than a full month
+        let full_june_days = working_days_in_range(
+            NaiveDate::from_ymd_opt(2025, 6, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2025, 6, 30).unwrap(),
+        );
+        let partial_june_days = working_days_in_range(
+            start,
+            NaiveDate::from_ymd_opt(2025, 6, 30).unwrap(),
+        );
+        assert!(summaries[5].expected_hours < full_june_days as f64 * 8.0);
+        assert!((summaries[5].expected_hours - partial_june_days as f64 * 8.0).abs() < 1e-9);
+        // July onwards: full month expected hours
+        assert!(summaries[6].expected_hours > 0.0);
+    }
+
+    #[test]
+    fn test_month_summaries_effective_start_excludes_pre_start_entries() {
+        // Entries before effective_start are excluded from total_hours, matching
+        // the behaviour of year_to_date_balance which uses the same clamped from.
+        let start = NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
+        let entries = vec![entry("2025-03-10", 8.0, 1, false)];
+        let summaries = month_summaries(&entries, 2025, Some(start), 8.0, &[], far_future());
+        let mar = &summaries[2];
+        assert_eq!(mar.total_hours, 0.0);
+        assert_eq!(mar.expected_hours, 0.0);
     }
 
 }

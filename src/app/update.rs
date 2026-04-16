@@ -146,7 +146,7 @@ impl EasyHarvest {
                     Page::Settings => {
                         // Refresh profile inputs from current settings
                         self.settings_form.weekly_hours_input = self.settings.total_weekly_hours.to_string();
-                        self.settings_form.percentage_input = format!("{}", (self.settings.work_percentage * 100.0).round() as u32);
+                        self.settings_form.percentage_input = format!("{:.1}", self.settings.work_percentage * 100.0);
                         self.settings_form.holidays_input = self.settings.total_holiday_days_per_year.to_string();
                         self.settings_form.first_work_day_input = self.settings.first_work_day
                             .map(|d| d.format("%d.%m.%Y").to_string())

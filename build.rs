@@ -7,13 +7,9 @@ fn main() {
 
     let logo = image::open("assets/logo.png").expect("assets/logo.png missing");
 
-    // ── Tray icons: RGBA8 (tray-icon expects raw RGBA bytes) ──────────────────
-    for sz in [16u32, 22, 32] {
-        let rgba = logo
-            .resize_exact(sz, sz, FilterType::Lanczos3)
-            .to_rgba8();
-        std::fs::write(format!("{out}/tray_{sz}.rgba8"), rgba.into_raw()).unwrap();
-    }
+    // ── Tray icon: RGBA8 at 32 × 32 (the only size tray.rs uses) ─────────────
+    let tray_rgba = logo.resize_exact(32, 32, FilterType::Lanczos3).to_rgba8();
+    std::fs::write(format!("{out}/tray_32.rgba8"), tray_rgba.into_raw()).unwrap();
 
     // ── Window icon: RGBA8 at 64 × 64 ────────────────────────────────────────
     let rgba64 = logo
@@ -57,8 +53,17 @@ fn main() {
     // Embed the .ico as a Windows PE resource when targeting Windows,
     // regardless of the host OS (supports cross-compilation).
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "1.0.0".into());
+        // Windows version strings require four components (major.minor.patch.build).
+        let version_quad = format!("{version}.0");
         let mut res = winresource::WindowsResource::new();
         res.set_icon(&ico_path);
+        res.set("FileDescription", "Easy Harvest — Harvest time tracking desktop app");
+        res.set("ProductName", "Easy Harvest");
+        res.set("LegalCopyright", "https://github.com/Che4ter/easy_harvest");
+        res.set("OriginalFilename", "easy_harvest.exe");
+        res.set("FileVersion", &version_quad);
+        res.set("ProductVersion", &version_quad);
         res.compile().expect("winresource compile");
     }
 }

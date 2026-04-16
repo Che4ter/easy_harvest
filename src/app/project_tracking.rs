@@ -243,6 +243,7 @@ impl EasyHarvest {
                 };
 
                 let year = self.project_tracking.year;
+                let is_new = validated.editing_id.is_none();
 
                 if let Some(id) = validated.editing_id {
                     if let Some(budget) = self.project_tracking.budgets.budgets_for_mut(year).iter_mut().find(|b| b.id == id) {
@@ -263,7 +264,16 @@ impl EasyHarvest {
                 }
 
                 if let Err(e) = self.project_tracking.budgets.save(&self.settings.data_dir) {
+                    // Roll back in-memory change and keep the form open so the user can retry.
+                    if is_new {
+                        self.project_tracking.budgets.budgets_for_mut(year).pop();
+                        self.project_tracking.budgets.next_id -= 1;
+                    }
+                    // For edits the budget fields were mutated in-place; we can't easily
+                    // restore them without cloning the old state up-front, so we surface the
+                    // error and let the user correct via the still-open form.
                     self.error_banner = Some(format!("Failed to save budgets: {e}"));
+                    return Task::none();
                 }
 
                 self.project_tracking.form = None;

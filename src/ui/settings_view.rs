@@ -207,6 +207,8 @@ fn profile_section(state: &EasyHarvest) -> Element<'_, Message> {
 // ── Carryover section ─────────────────────────────────────────────────────────
 
 fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
+    let epd = state.settings.expected_hours_per_day();
+
     // Collect existing entries sorted by year descending
     let mut entries: Vec<(i32, &crate::state::settings::YearCarryover)> =
         state.settings.carryover.iter().map(|(y, c)| (*y, c)).collect();
@@ -231,7 +233,7 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
             let values = row![
                 caption("Vacation"),
                 Space::new().width(4).height(4),
-                text(format!("{:.1}d", c.holiday_days))
+                text(format!("{:.1}h", c.holiday_days * epd))
                     .font(FONT_SEMIBOLD).size(12).color(TEXT_PRIMARY),
                 Space::new().width(16).height(16),
                 container(Space::new().width(1).height(1))
@@ -288,9 +290,9 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
         ]
         .spacing(super::FORM_FIELD_GAP),
         Space::new().width(8).height(8),
-        // Holiday days field
+        // Holiday hours field
         column![
-            caption("Vacation days"),
+            caption("Vacation hours"),
             text_input("0.0", &state.settings_form.carryover_holiday_input)
                 .on_input(|v| Message::Settings(SettingsMsg::CarryoverHolidayChanged(v)))
                 .size(13).padding([7, 8]).style(input_style).width(72),

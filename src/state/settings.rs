@@ -64,7 +64,8 @@ fn easter_sunday(year: i32) -> NaiveDate {
     let m = (a + 11 * h + 22 * l) / 451;
     let month = (h + l - 7 * m + 114) / 31;
     let day = ((h + l - 7 * m + 114) % 31) + 1;
-    NaiveDate::from_ymd_opt(year, month as u32, day as u32).expect("invalid easter date")
+    NaiveDate::from_ymd_opt(year, month as u32, day as u32)
+        .unwrap_or_else(|| panic!("easter algorithm produced invalid date for year {year}: month={month} day={day}"))
 }
 
 /// Generate Swiss cantonal public holidays for the given year.
@@ -74,21 +75,25 @@ fn easter_sunday(year: i32) -> NaiveDate {
 /// Stephanstag, Silvester).
 pub fn swiss_public_holidays(year: i32) -> Vec<PublicHoliday> {
     let easter = easter_sunday(year);
+    let d = |m, day| {
+        NaiveDate::from_ymd_opt(year, m, day)
+            .unwrap_or_else(|| panic!("fixed holiday date invalid for year {year}: month={m} day={day}"))
+    };
     vec![
-        PublicHoliday { date: NaiveDate::from_ymd_opt(year, 1, 1).unwrap(),  name: "Neujahr".into(),            half_day: false },
-        PublicHoliday { date: easter - Duration::days(2),                     name: "Karfreitag".into(),         half_day: false },
-        PublicHoliday { date: easter + Duration::days(1),                     name: "Ostermontag".into(),        half_day: false },
-        PublicHoliday { date: NaiveDate::from_ymd_opt(year, 5, 1).unwrap(),  name: "Tag der Arbeit".into(),     half_day: true  },
-        PublicHoliday { date: easter + Duration::days(39),                    name: "Auffahrt".into(),           half_day: false },
-        PublicHoliday { date: easter + Duration::days(50),                    name: "Pfingstmontag".into(),      half_day: false },
-        PublicHoliday { date: easter + Duration::days(60),                    name: "Fronleichnam".into(),       half_day: false },
-        PublicHoliday { date: NaiveDate::from_ymd_opt(year, 8, 1).unwrap(),  name: "Bundesfeiertag".into(),     half_day: false },
-        PublicHoliday { date: NaiveDate::from_ymd_opt(year, 8, 15).unwrap(), name: "Mariä Himmelfahrt".into(),  half_day: false },
-        PublicHoliday { date: NaiveDate::from_ymd_opt(year, 11, 1).unwrap(), name: "Allerheiligen".into(),      half_day: false },
-        PublicHoliday { date: NaiveDate::from_ymd_opt(year, 12, 24).unwrap(),name: "Heiligabend".into(),        half_day: true  },
-        PublicHoliday { date: NaiveDate::from_ymd_opt(year, 12, 25).unwrap(),name: "Weihnachtstag".into(),      half_day: false },
-        PublicHoliday { date: NaiveDate::from_ymd_opt(year, 12, 26).unwrap(),name: "Stephanstag".into(),        half_day: false },
-        PublicHoliday { date: NaiveDate::from_ymd_opt(year, 12, 31).unwrap(),name: "Silvester".into(),          half_day: true  },
+        PublicHoliday { date: d(1, 1),               name: "Neujahr".into(),           half_day: false },
+        PublicHoliday { date: easter - Duration::days(2), name: "Karfreitag".into(),    half_day: false },
+        PublicHoliday { date: easter + Duration::days(1), name: "Ostermontag".into(),   half_day: false },
+        PublicHoliday { date: d(5, 1),               name: "Tag der Arbeit".into(),     half_day: true  },
+        PublicHoliday { date: easter + Duration::days(39), name: "Auffahrt".into(),     half_day: false },
+        PublicHoliday { date: easter + Duration::days(50), name: "Pfingstmontag".into(),half_day: false },
+        PublicHoliday { date: easter + Duration::days(60), name: "Fronleichnam".into(), half_day: false },
+        PublicHoliday { date: d(8, 1),               name: "Bundesfeiertag".into(),     half_day: false },
+        PublicHoliday { date: d(8, 15),              name: "Mariä Himmelfahrt".into(),  half_day: false },
+        PublicHoliday { date: d(11, 1),              name: "Allerheiligen".into(),       half_day: false },
+        PublicHoliday { date: d(12, 24),             name: "Heiligabend".into(),         half_day: true  },
+        PublicHoliday { date: d(12, 25),             name: "Weihnachtstag".into(),       half_day: false },
+        PublicHoliday { date: d(12, 26),             name: "Stephanstag".into(),         half_day: false },
+        PublicHoliday { date: d(12, 31),             name: "Silvester".into(),           half_day: true  },
     ]
 }
 
@@ -236,10 +241,12 @@ impl Settings {
 
     pub fn load(data_dir: &Path) -> Self {
         let path = Self::settings_path(data_dir);
-        let mut settings: Self = super::io::load_json(&path).unwrap_or_else(|| Self {
-            data_dir: data_dir.to_path_buf(),
-            ..Default::default()
-        });
+        let mut settings: Self = super::io::load_json(&path)
+            .and_then(|s: Self| s.validate().ok().map(|_| s))
+            .unwrap_or_else(|| Self {
+                data_dir: data_dir.to_path_buf(),
+                ..Default::default()
+            });
         settings.data_dir = data_dir.to_path_buf();
         settings.autostart = crate::autostart::is_enabled();
         settings
@@ -472,12 +479,124 @@ mod tests {
     }
 
     #[test]
+    fn test_swiss_public_holidays_2027() {
+        // Easter 2027 is March 28 — an early Easter, good edge-case coverage.
+        let holidays = swiss_public_holidays(2027);
+        assert_eq!(holidays.len(), 14);
+
+        let by_name = |n: &str| holidays.iter().find(|h| h.name == n).unwrap();
+
+        assert_eq!(by_name("Neujahr").date,          NaiveDate::from_ymd_opt(2027, 1, 1).unwrap());
+        assert_eq!(by_name("Karfreitag").date,       NaiveDate::from_ymd_opt(2027, 3, 26).unwrap());
+        assert_eq!(by_name("Ostermontag").date,      NaiveDate::from_ymd_opt(2027, 3, 29).unwrap());
+        assert_eq!(by_name("Tag der Arbeit").date,   NaiveDate::from_ymd_opt(2027, 5, 1).unwrap());
+        assert!(by_name("Tag der Arbeit").half_day);
+        assert_eq!(by_name("Auffahrt").date,         NaiveDate::from_ymd_opt(2027, 5, 6).unwrap());
+        assert_eq!(by_name("Pfingstmontag").date,    NaiveDate::from_ymd_opt(2027, 5, 17).unwrap());
+        assert_eq!(by_name("Fronleichnam").date,     NaiveDate::from_ymd_opt(2027, 5, 27).unwrap());
+        assert_eq!(by_name("Bundesfeiertag").date,   NaiveDate::from_ymd_opt(2027, 8, 1).unwrap());
+        assert_eq!(by_name("Mariä Himmelfahrt").date,NaiveDate::from_ymd_opt(2027, 8, 15).unwrap());
+        assert_eq!(by_name("Allerheiligen").date,    NaiveDate::from_ymd_opt(2027, 11, 1).unwrap());
+        assert_eq!(by_name("Heiligabend").date,      NaiveDate::from_ymd_opt(2027, 12, 24).unwrap());
+        assert!(by_name("Heiligabend").half_day);
+        assert_eq!(by_name("Weihnachtstag").date,    NaiveDate::from_ymd_opt(2027, 12, 25).unwrap());
+        assert_eq!(by_name("Stephanstag").date,      NaiveDate::from_ymd_opt(2027, 12, 26).unwrap());
+        assert_eq!(by_name("Silvester").date,        NaiveDate::from_ymd_opt(2027, 12, 31).unwrap());
+        assert!(by_name("Silvester").half_day);
+    }
+
+    #[test]
     fn test_easter_known_years() {
-        // Verify a few known Easter dates.
-        assert_eq!(easter_sunday(2024), NaiveDate::from_ymd_opt(2024, 3, 31).unwrap());
-        assert_eq!(easter_sunday(2025), NaiveDate::from_ymd_opt(2025, 4, 20).unwrap());
-        assert_eq!(easter_sunday(2026), NaiveDate::from_ymd_opt(2026, 4, 5).unwrap());
-        assert_eq!(easter_sunday(2027), NaiveDate::from_ymd_opt(2027, 3, 28).unwrap());
+        // Dates verified against https://www.timeanddate.com/calendar/catholic-easter.html
+        let known = [
+            (2020,  4, 12),
+            (2021,  4,  4),
+            (2022,  4, 17),
+            (2023,  4,  9),
+            (2024,  3, 31),
+            (2025,  4, 20),
+            (2026,  4,  5),
+            (2027,  3, 28),
+            (2028,  4, 16),
+            (2029,  4,  1),
+            (2030,  4, 21),
+            (2031,  4, 13),
+            (2032,  3, 28),
+            (2033,  4, 17),
+            (2034,  4,  9),
+            (2035,  3, 25),
+        ];
+        for (year, month, day) in known {
+            assert_eq!(
+                easter_sunday(year),
+                NaiveDate::from_ymd_opt(year, month, day).unwrap(),
+                "Easter {year}",
+            );
+        }
+    }
+
+    #[test]
+    fn test_swiss_public_holidays_structural_invariants() {
+        use chrono::Duration;
+
+        // Run structural checks for every year 2020–2035.
+        for year in 2020..=2035 {
+            let holidays = swiss_public_holidays(year);
+            let by_name = |n: &str| {
+                holidays.iter().find(|h| h.name == n)
+                    .unwrap_or_else(|| panic!("{n} missing for {year}"))
+            };
+
+            // Always 14 holidays.
+            assert_eq!(holidays.len(), 14, "wrong count for {year}");
+
+            // All dates must fall within the correct year.
+            for h in &holidays {
+                assert_eq!(h.date.year(), year, "{} date year wrong for {year}", h.name);
+            }
+
+            // Fixed-date holidays are always the same calendar date.
+            assert_eq!(by_name("Neujahr").date.month(),          1);
+            assert_eq!(by_name("Neujahr").date.day(),            1);
+            assert_eq!(by_name("Tag der Arbeit").date.month(),   5);
+            assert_eq!(by_name("Tag der Arbeit").date.day(),     1);
+            assert_eq!(by_name("Bundesfeiertag").date.month(),   8);
+            assert_eq!(by_name("Bundesfeiertag").date.day(),     1);
+            assert_eq!(by_name("Mariä Himmelfahrt").date.month(),8);
+            assert_eq!(by_name("Mariä Himmelfahrt").date.day(), 15);
+            assert_eq!(by_name("Allerheiligen").date.month(),   11);
+            assert_eq!(by_name("Allerheiligen").date.day(),      1);
+            assert_eq!(by_name("Heiligabend").date.month(),     12);
+            assert_eq!(by_name("Heiligabend").date.day(),       24);
+            assert_eq!(by_name("Weihnachtstag").date.month(),   12);
+            assert_eq!(by_name("Weihnachtstag").date.day(),     25);
+            assert_eq!(by_name("Stephanstag").date.month(),     12);
+            assert_eq!(by_name("Stephanstag").date.day(),       26);
+            assert_eq!(by_name("Silvester").date.month(),       12);
+            assert_eq!(by_name("Silvester").date.day(),         31);
+
+            // Easter-derived holidays have the correct offset from Easter Sunday.
+            let easter = easter_sunday(year);
+            assert_eq!(by_name("Karfreitag").date,   easter - Duration::days(2));
+            assert_eq!(by_name("Ostermontag").date,  easter + Duration::days(1));
+            assert_eq!(by_name("Auffahrt").date,     easter + Duration::days(39));
+            assert_eq!(by_name("Pfingstmontag").date,easter + Duration::days(50));
+            assert_eq!(by_name("Fronleichnam").date, easter + Duration::days(60));
+
+            // Half-day flags.
+            assert!( by_name("Tag der Arbeit").half_day,  "Tag der Arbeit should be half-day for {year}");
+            assert!( by_name("Heiligabend").half_day,     "Heiligabend should be half-day for {year}");
+            assert!( by_name("Silvester").half_day,       "Silvester should be half-day for {year}");
+            assert!(!by_name("Karfreitag").half_day,      "Karfreitag should be full-day for {year}");
+            assert!(!by_name("Ostermontag").half_day,     "Ostermontag should be full-day for {year}");
+            assert!(!by_name("Weihnachtstag").half_day,   "Weihnachtstag should be full-day for {year}");
+
+            // Chronological ordering of Easter cluster.
+            assert!(by_name("Karfreitag").date < by_name("Ostermontag").date);
+            assert!(by_name("Ostermontag").date < by_name("Auffahrt").date);
+            assert!(by_name("Auffahrt").date < by_name("Pfingstmontag").date);
+            assert!(by_name("Pfingstmontag").date < by_name("Fronleichnam").date);
+        }
     }
 
     #[test]

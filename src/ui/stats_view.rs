@@ -1,3 +1,4 @@
+use chrono::Datelike;
 use iced::widget::{column, container, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Color, Element, Length};
 
@@ -26,10 +27,11 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         .into()
     } else {
         let balance_card = build_balance_card(state, year);
+        let monthly_section = build_monthly_breakdown(state);
         let adjustments_section = build_adjustments_section(state, year);
 
         scrollable(
-            column![balance_card, adjustments_section]
+            column![balance_card, monthly_section, adjustments_section]
                 .spacing(SECTION_GAP),
         )
         .height(Length::Fill)
@@ -78,23 +80,23 @@ fn build_balance_card(state: &EasyHarvest, year: i32) -> Element<'_, Message> {
         let mut rows = vec![
             stat_row_owned(
                 "Hours booked",
-                format!("{:.1}h", bal.period.total_hours),
+                format!("{:.2}h", bal.period.total_hours),
                 TEXT_PRIMARY,
             ),
             stat_row_owned(
                 "Expected",
-                format!("{:.1}h", bal.period.expected_hours),
+                format!("{:.2}h", bal.period.expected_hours),
                 TEXT_MUTED,
             ),
             stat_row_owned(
                 "Period balance",
-                format!("{period_sign}{:.1}h", bal.period.balance_hours),
+                format!("{period_sign}{:.2}h", bal.period.balance_hours),
                 if bal.period.balance_hours >= 0.0 { SUCCESS } else { DANGER },
             ),
             divider(),
             stat_row_owned(
                 "Carryover from last year",
-                format!("{carry_sign}{:.1}h", bal.carryover_hours),
+                format!("{carry_sign}{:.2}h", bal.carryover_hours),
                 TEXT_MUTED,
             ),
         ];
@@ -103,14 +105,14 @@ fn build_balance_card(state: &EasyHarvest, year: i32) -> Element<'_, Message> {
             let adj_sign = if bal.manual_adjustments_hours >= 0.0 { "+" } else { "" };
             rows.push(stat_row_owned(
                 "Manual adjustments",
-                format!("{adj_sign}{:.1}h", bal.manual_adjustments_hours),
+                format!("{adj_sign}{:.2}h", bal.manual_adjustments_hours),
                 if bal.manual_adjustments_hours >= 0.0 { SUCCESS } else { DANGER },
             ));
         }
 
         rows.push(stat_row_owned(
             "Total balance",
-            format!("{balance_sign}{balance:.1}h"),
+            format!("{balance_sign}{balance:.2}h"),
             balance_color,
         ));
 
@@ -118,6 +120,85 @@ fn build_balance_card(state: &EasyHarvest, year: i32) -> Element<'_, Message> {
     } else {
         empty_card("Overtime Balance", "No data yet")
     }
+}
+
+fn build_monthly_breakdown(state: &EasyHarvest) -> Element<'_, Message> {
+    let Some(months) = &state.month_summaries else {
+        return Space::new().into();
+    };
+
+    // Header row
+    let header = row![
+        text("Month")
+            .font(FONT_REGULAR).size(12).color(TEXT_MUTED).width(48),
+        text("Booked")
+            .font(FONT_REGULAR).size(12).color(TEXT_MUTED).width(Length::Fill),
+        text("Expected")
+            .font(FONT_REGULAR).size(12).color(TEXT_MUTED).width(Length::Fill),
+        text("Month Δ")
+            .font(FONT_REGULAR).size(12).color(TEXT_MUTED).width(72),
+        text("Status")
+            .font(FONT_REGULAR).size(12).color(TEXT_MUTED).width(80),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    // For the current year, don't show months beyond today — pre-booked
+    // entries in future months would show 0 expected hours and inflate overtime.
+    let today = chrono::Local::now().date_naive();
+    let max_month = if state.overtime_year == today.year() {
+        today.month()
+    } else {
+        12
+    };
+
+    let mut running = 0.0_f64;
+    let rows: Vec<Element<Message>> = months
+        .iter()
+        .filter(|m| m.month <= max_month && (m.total_hours > 0.0 || m.expected_hours > 0.0))
+        .map(|m| {
+            running += m.balance_hours;
+
+            let delta_color = if m.balance_hours >= 0.0 { SUCCESS } else { DANGER };
+            let delta_sign = if m.balance_hours >= 0.0 { "+" } else { "" };
+            let status_color = if running >= 0.0 { SUCCESS } else { DANGER };
+            let status_sign = if running >= 0.0 { "+" } else { "" };
+
+            row![
+                text(super::month_abbr(m.month))
+                    .font(FONT_SEMIBOLD).size(13).color(TEXT_PRIMARY).width(48),
+                text(format!("{:.2}h", m.total_hours))
+                    .font(FONT_REGULAR).size(13).color(TEXT_PRIMARY).width(Length::Fill),
+                text(format!("{:.2}h", m.expected_hours))
+                    .font(FONT_REGULAR).size(13).color(TEXT_MUTED).width(Length::Fill),
+                text(format!("{delta_sign}{:.2}h", m.balance_hours))
+                    .font(FONT_REGULAR).size(13).color(delta_color).width(72),
+                text(format!("{status_sign}{:.2}h", running))
+                    .font(FONT_SEMIBOLD).size(13).color(status_color).width(80),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
+        })
+        .collect();
+
+    if rows.is_empty() {
+        return Space::new().into();
+    }
+
+    container(
+        column![
+            section_heading("Monthly Breakdown"),
+            header,
+            divider(),
+            column(rows).spacing(6),
+        ]
+        .spacing(SECTION_GAP),
+    )
+    .style(card_style)
+    .padding(12)
+    .width(Length::Fill)
+    .into()
 }
 
 fn build_adjustments_section(state: &EasyHarvest, year: i32) -> Element<'_, Message> {
@@ -187,7 +268,7 @@ fn adjustment_row(adj: &crate::state::overtime_adjustments::OvertimeAdjustment) 
                 .size(13)
                 .color(TEXT_MUTED)
                 .width(90),
-            text(format!("{sign}{:.1}h", adj.hours))
+            text(format!("{sign}{:.2}h", adj.hours))
                 .font(FONT_SEMIBOLD)
                 .size(13)
                 .color(color)

@@ -1,6 +1,6 @@
 [package]
 name = "easy_harvest"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 
 [lib]
@@ -50,6 +50,17 @@ keyring = { version = "3", features = ["apple-native"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
 winreg = "0.56"
+windows-sys = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging"] }
+
+[package.metadata.bundle]
+name = "Easy Harvest"
+identifier = "com.easyharvest"
+icon = ["assets/logo.png"]
+short_description = "Quick Harvest time entry booking from your desktop"
+long_description = "Book and review Harvest time entries without opening the web UI."
+copyright = "© Easy Harvest contributors"
+category = "Productivity"
+osx_minimum_system_version = "12.0"
 
 [build-dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }

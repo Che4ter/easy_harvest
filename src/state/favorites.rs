@@ -75,7 +75,7 @@ impl Favorites {
             .find(|e| e.project_id == project_id && e.task_id == task_id)
     }
 
-    /// Record a booking — increments `use_count` and sets `last_used_date` to today.
+    /// Record a booking — increments `use_count` for the given project+task.
     /// Creates a new entry if none exists yet.
     pub fn record_use(&mut self, project_id: i64, task_id: i64) {
         if let Some(e) = self.find_mut(project_id, task_id) {

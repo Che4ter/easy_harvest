@@ -43,7 +43,7 @@ pub enum StatsMsg {
     Refresh,
     YearPrev,
     YearNext,
-    Loaded(u64, Result<(YearBalance, HolidayStats), String>),
+    Loaded(u64, Result<(YearBalance, HolidayStats, Vec<crate::stats::MonthSummary>), String>),
     // Adjustment form
     ShowAdjForm,
     HideAdjForm,
@@ -61,6 +61,7 @@ impl EasyHarvest {
                 self.loading = true;
                 self.year_balance = None;
                 self.holiday_stats = None;
+                self.month_summaries = None;
                 self.stats_gen += 1;
                 self.load_stats_task()
             }
@@ -69,6 +70,7 @@ impl EasyHarvest {
                 self.overtime_year -= 1;
                 self.year_balance = None;
                 self.holiday_stats = None;
+                self.month_summaries = None;
                 self.overtime_adj_form = None;
                 if self.client.is_some() {
                     self.loading = true;
@@ -83,6 +85,7 @@ impl EasyHarvest {
                 self.overtime_year += 1;
                 self.year_balance = None;
                 self.holiday_stats = None;
+                self.month_summaries = None;
                 self.overtime_adj_form = None;
                 if self.client.is_some() {
                     self.loading = true;
@@ -97,9 +100,10 @@ impl EasyHarvest {
                 if gen != self.stats_gen { return Task::none(); }
                 self.loading = false;
                 match result {
-                    Ok((balance, holidays)) => {
+                    Ok((balance, holidays, months)) => {
                         self.year_balance = Some(balance);
                         self.holiday_stats = Some(holidays);
+                        self.month_summaries = Some(months);
                     }
                     Err(e) => self.error_banner = Some(e),
                 }
@@ -155,7 +159,12 @@ impl EasyHarvest {
                     }
                 );
                 if let Err(e) = self.overtime_adjustments.save(&self.settings.data_dir) {
+                    // Roll back the in-memory change so displayed data matches disk,
+                    // and leave the form open so the user can retry.
+                    self.overtime_adjustments.adjustments_for_mut(year).retain(|a| a.id != id);
+                    self.overtime_adjustments.next_id -= 1;
                     self.error_banner = Some(format!("Failed to save adjustments: {e}"));
+                    return Task::none();
                 }
                 self.overtime_adj_form = None;
 

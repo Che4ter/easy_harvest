@@ -5,7 +5,7 @@ pub mod settings_view;
 pub mod stats_view;
 pub mod vacation_view;
 
-use iced::widget::{button, column, container, row, text, text_input, Space};
+use iced::widget::{button, column, container, row, stack, text, text_input, Space};
 use iced::{Alignment, Border, Color, Element, Length, Padding};
 
 use crate::app::{Message, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD, SURFACE, SURFACE_HOVER, SURFACE_RAISED, TEXT_MUTED, TEXT_PRIMARY};
@@ -60,11 +60,9 @@ pub fn month_abbr(m: u32) -> &'static str {
 // ── Time helpers ──────────────────────────────────────────────────────────────
 
 /// Convert decimal hours to "H:MM" string (e.g. 2.5 → "2:30").
+/// Always non-negative; delegates to `fmt_hm` which handles the arithmetic.
 pub fn format_hhmm(hours: f64) -> String {
-    let total_minutes = (hours * 60.0).round() as u64;
-    let h = total_minutes / 60;
-    let m = total_minutes % 60;
-    format!("{h}:{m:02}")
+    fmt_hm(hours)
 }
 
 /// Parse a time string that is either "H:MM" or a decimal number.
@@ -233,6 +231,50 @@ pub fn progress_bar(
         .width(Length::Fill)
         .height(height as f32)
         .into()
+}
+
+/// Like [`progress_bar`] but with a thin vertical tick at `marker_pct` to show
+/// a secondary threshold (e.g. the daily expected-hours target on a booking bar).
+///
+/// The tick is rendered as a 2 px white overlay using a `stack`.
+pub fn progress_bar_with_marker(
+    pct: f32,
+    bar_color: Color,
+    marker_pct: f32,
+    height: u16,
+) -> Element<'static, Message> {
+    let base = progress_bar(pct, bar_color, height);
+
+    // Only draw the tick when the marker falls strictly inside the bar
+    // (no tick at 0 % or 100 % — it would be invisible or redundant).
+    let marker_pct = marker_pct.clamp(0.0, 1.0);
+    if marker_pct <= 0.01 || marker_pct >= 0.99 {
+        return base;
+    }
+
+    // Split the overlay row into left-space / 2px-tick / right-space using
+    // FillPortion.  The 2 px tick is fixed-width, so the portions distribute
+    // the remaining width — good enough for a visual indicator.
+    let left_p  = (marker_pct * 1000.0) as u16;
+    let right_p = 1000u16.saturating_sub(left_p);
+
+    let tick: Element<Message> = container(Space::new())
+        .style(|_: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(Color { r: 1.0, g: 1.0, b: 1.0, a: 0.45 })),
+            ..Default::default()
+        })
+        .width(2)
+        .height(height as f32)
+        .into();
+
+    let overlay: Element<Message> = row![
+        Space::new().width(Length::FillPortion(left_p)),
+        tick,
+        Space::new().width(Length::FillPortion(right_p)),
+    ]
+    .into();
+
+    stack![base, overlay].width(Length::Fill).into()
 }
 
 /// Small "×" delete button with DANGER hover.
@@ -605,5 +647,29 @@ mod tests {
         let formatted = format_hhmm(original);
         let parsed = parse_hours(&formatted).unwrap();
         assert!((parsed - original).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_hours_sub_hour_hhmm() {
+        // h=0, valid minutes — should return fractional hours, not be rejected
+        assert_eq!(parse_hours("0:30"), Some(0.5));
+        assert_eq!(parse_hours("0:15"), Some(0.25));
+        assert_eq!(parse_hours("0:01"), Some(1.0 / 60.0));
+    }
+
+    // --- fmt_hm negative values ---
+
+    #[test]
+    fn fmt_hm_negative() {
+        assert_eq!(fmt_hm(-2.5),  "-2:30");
+        assert_eq!(fmt_hm(-0.25), "-0:15");
+        assert_eq!(fmt_hm(-8.0),  "-8:00");
+    }
+
+    #[test]
+    fn fmt_hm_positive_unchanged() {
+        // Positive values must not get a sign prefix.
+        assert_eq!(fmt_hm(1.5), "1:30");
+        assert_eq!(fmt_hm(0.0), "0:00");
     }
 }

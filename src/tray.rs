@@ -200,11 +200,27 @@ fn spawn_tray_thread(
                     }
                 }
 
-                // Pump the platform event loop.
-                // On Linux, GTK needs to process events for the tray to work.
+                // Pump the platform event loop so the tray icon's hidden
+                // window can process WM_COMMAND (menu clicks) and tray
+                // notification messages.
                 #[cfg(target_os = "linux")]
                 gtk::main_iteration_do(false);
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(target_os = "windows")]
+                {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{
+                        DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+                    };
+                    // Drain all pending messages before sleeping.
+                    unsafe {
+                        let mut msg = std::mem::zeroed::<MSG>();
+                        while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                            TranslateMessage(&msg);
+                            DispatchMessageW(&msg);
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "windows")))]
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
         })

@@ -133,6 +133,14 @@ pub const DANGER: Color = Color {
     a: 1.0,
 };
 
+/// Amber warning — used for "almost there" progress states.
+pub const WARNING: Color = Color {
+    r: 0.961,
+    g: 0.620,
+    b: 0.043,
+    a: 1.0,
+};
+
 /// Root background — the darkest layer behind all content.
 pub const BACKGROUND: Color = Color {
     r: 0.100,
@@ -223,6 +231,7 @@ pub struct EasyHarvest {
     pub work_day_store: WorkDayStore,
     pub year_balance: Option<YearBalance>,
     pub holiday_stats: Option<HolidayStats>,
+    pub month_summaries: Option<Vec<crate::stats::MonthSummary>>,
     pub loading: bool,
     pub error_banner: Option<String>,
 
@@ -366,7 +375,7 @@ impl EasyHarvest {
 
         let init_data_dir = settings.data_dir.display().to_string();
         let init_weekly = settings.total_weekly_hours.to_string();
-        let init_pct = format!("{}", (settings.work_percentage * 100.0).round() as u32);
+        let init_pct = format!("{:.1}", settings.work_percentage * 100.0);
         let init_holidays = settings.total_holiday_days_per_year.to_string();
         let init_first_work_day = settings.first_work_day
             .map(|d| d.format("%d.%m.%Y").to_string())
@@ -388,6 +397,7 @@ impl EasyHarvest {
             work_day_store,
             year_balance: None,
             holiday_stats: None,
+            month_summaries: None,
             loading: false,
             error_banner: None,
             entries_gen: 0,

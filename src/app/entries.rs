@@ -41,7 +41,7 @@ impl EntryForm {
                 display
             },
             selected_project_idx: idx,
-            hours_input: format!("{:.2}", entry.hours),
+            hours_input: crate::ui::format_hhmm(entry.hours),
             notes_input: entry.notes.clone().unwrap_or_default(),
             error: None,
         }
@@ -82,6 +82,8 @@ pub enum EntryMsg {
     TimerStarted(Result<TimeEntry, String>),
     TimerStopped(Result<TimeEntry, String>),
     TemplateApply(usize),
+    /// Fill the hours field with the remaining unbooked worked time.
+    FillRemaining,
 }
 
 impl EasyHarvest {
@@ -364,6 +366,35 @@ impl EasyHarvest {
                         }
                     }
                     Err(e) => self.error_banner = Some(e),
+                }
+                Task::none()
+            }
+
+            EntryMsg::FillRemaining => {
+                if self.entry_form.is_none() {
+                    return Task::none();
+                }
+                let booked: f64 = self.entries.iter().map(|e| e.hours).sum();
+                let worked_h = self
+                    .work_day_store
+                    .get_or_default(self.current_date)
+                    .worked_hours(chrono::Local::now().naive_local().time());
+                let target = worked_h.max(self.settings.expected_hours_per_day());
+                // If editing an existing entry, exclude its hours from booked so
+                // the fill amount is the true gap, not double-counting.
+                let editing_hours = self
+                    .entry_form
+                    .as_ref()
+                    .and_then(|f| f.editing_id)
+                    .and_then(|id| self.entries.iter().find(|e| e.id == id))
+                    .map(|e| e.hours)
+                    .unwrap_or(0.0);
+                let remaining = (target - (booked - editing_hours)).max(0.0);
+                let total_mins = (remaining * 60.0).round() as u32;
+                let h = total_mins / 60;
+                let m = total_mins % 60;
+                if let Some(form) = &mut self.entry_form {
+                    form.hours_input = format!("{h}:{m:02}");
                 }
                 Task::none()
             }

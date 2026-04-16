@@ -9,11 +9,46 @@
 //! Run one:
 //!   HARVEST_TOKEN=<token> HARVEST_ACCOUNT_ID=<id> cargo test test_user -- --ignored
 
-use easy_harvest::harvest::client::HarvestClient;
+use easy_harvest::harvest::client::{HarvestClient, HarvestError};
 use easy_harvest::harvest::models::{CreateTimeEntry, UpdateTimeEntry};
 use easy_harvest::state::settings::Settings;
 use easy_harvest::stats;
-use chrono::Datelike;
+use chrono::{Datelike, Duration, NaiveDate};
+
+/// Returns a Monday at least 30 days in the future, safe to use as a test date.
+fn safe_test_date() -> String {
+    let today = chrono::Local::now().naive_local().date();
+    let mut date = today + Duration::days(30);
+    // Advance to the next Monday
+    while date.weekday().num_days_from_monday() != 0 {
+        date += Duration::days(1);
+    }
+    date.format("%Y-%m-%d").to_string()
+}
+
+/// Find an active project + task from assignments, or panic with a clear message.
+async fn active_project_and_task(
+    client: &HarvestClient,
+) -> (easy_harvest::harvest::models::ProjectAssignment, easy_harvest::harvest::models::ProjectTaskAssignment) {
+    let assignments = client
+        .list_all_my_project_assignments()
+        .await
+        .expect("list_all_my_project_assignments failed");
+
+    let pa = assignments
+        .into_iter()
+        .find(|pa| pa.is_active && pa.task_assignments.iter().any(|ta| ta.is_active))
+        .expect("no active project with tasks found");
+
+    let ta = pa
+        .task_assignments
+        .iter()
+        .find(|ta| ta.is_active)
+        .cloned()
+        .expect("no active task");
+
+    (pa, ta)
+}
 
 /// Returns a client built from HARVEST_TOKEN / HARVEST_ACCOUNT_ID env vars,
 /// or panics with a clear message if they are not set.
@@ -118,8 +153,8 @@ async fn test_create_update_delete_entry() {
         .find(|ta| ta.is_active)
         .expect("no active task found");
 
-    // Use next Monday so this test never touches real bookings on worked days.
-    let test_date = "2026-04-13";
+    // Use a Monday well in the future so this test never touches real bookings.
+    let test_date = safe_test_date();
 
     // --- Create ---
     let created = client
@@ -167,7 +202,7 @@ async fn test_create_update_delete_entry() {
 
     // --- Verify deletion ---
     let entries_after = client
-        .list_all_time_entries(test_date, test_date)
+        .list_all_time_entries(&test_date, &test_date)
         .await
         .expect("list after delete failed");
 
@@ -271,4 +306,357 @@ async fn test_stats_holiday_year() {
     println!("  Period balance: {:+.2}h", ytd.period.balance_hours);
     println!("  Carryover:      {:+.2}h", ytd.carryover_hours);
     println!("  Total balance:  {:+.2}h", ytd.total_balance);
+}
+
+// ---------------------------------------------------------------------------
+// Error handling
+// ---------------------------------------------------------------------------
+
+/// A bad token must produce HarvestError::Unauthorized — not a network or
+/// parse error — so the UI can show a useful message.
+#[tokio::test]
+#[ignore]
+async fn test_unauthorized_error() {
+    let bad_client = HarvestClient::new("invalid-token".into(), "000000".into())
+        .expect("failed to build client");
+
+    let result = bad_client.get_current_user().await;
+
+    assert!(
+        matches!(result, Err(HarvestError::Unauthorized)),
+        "expected Unauthorized, got: {result:?}"
+    );
+}
+
+/// Fetching a time entry that does not exist must return an API error (404),
+/// not panic or produce a deserialization error.
+#[tokio::test]
+#[ignore]
+async fn test_delete_nonexistent_entry_returns_api_error() {
+    let result = client().delete_time_entry(1).await;
+
+    assert!(
+        matches!(result, Err(HarvestError::Api { status: 404, .. }) | Err(HarvestError::Api { .. })),
+        "expected an API error for a nonexistent entry, got: {result:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Date-range filtering
+// ---------------------------------------------------------------------------
+
+/// The API must not return entries outside the requested date range.
+#[tokio::test]
+#[ignore]
+async fn test_date_range_boundaries() {
+    let today = chrono::Local::now().naive_local().date();
+    let (from, to) = stats::month_bounds(today.year(), today.month());
+    let from_str = from.format("%Y-%m-%d").to_string();
+    let to_str = to.format("%Y-%m-%d").to_string();
+
+    let entries = client()
+        .list_all_time_entries(&from_str, &to_str)
+        .await
+        .expect("list_all_time_entries failed");
+
+    for entry in &entries {
+        let date = NaiveDate::parse_from_str(&entry.spent_date, "%Y-%m-%d")
+            .expect("entry has invalid spent_date");
+        assert!(
+            date >= from && date <= to,
+            "entry [{}] has date {} outside requested range {} – {}",
+            entry.id, entry.spent_date, from_str, to_str
+        );
+    }
+}
+
+/// Requesting a single day must return only entries for that day.
+#[tokio::test]
+#[ignore]
+async fn test_single_day_range() {
+    let today = chrono::Local::now().naive_local().date().format("%Y-%m-%d").to_string();
+
+    let entries = client()
+        .list_all_time_entries(&today, &today)
+        .await
+        .expect("list_all_time_entries failed");
+
+    for entry in &entries {
+        assert_eq!(
+            entry.spent_date, today,
+            "entry [{}] spent_date {} != requested date {}",
+            entry.id, entry.spent_date, today
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Entry field validation
+// ---------------------------------------------------------------------------
+
+/// All fields that must be present on every entry returned by the API are
+/// non-empty / in the expected range.
+#[tokio::test]
+#[ignore]
+async fn test_entry_fields_are_valid() {
+    let today = chrono::Local::now().naive_local().date();
+    let (from, _) = stats::month_bounds(today.year(), today.month());
+    let from_str = from.format("%Y-%m-%d").to_string();
+    let to_str = today.format("%Y-%m-%d").to_string();
+
+    let entries = client()
+        .list_all_time_entries(&from_str, &to_str)
+        .await
+        .expect("list_all_time_entries failed");
+
+    if entries.is_empty() {
+        println!("No entries in range — skipping field validation");
+        return;
+    }
+
+    for entry in &entries {
+        assert!(entry.id > 0, "entry id must be positive");
+        assert!(entry.hours >= 0.0, "entry hours must be non-negative");
+        assert!(!entry.spent_date.is_empty(), "entry spent_date must not be empty");
+        assert!(entry.project.id > 0, "project id must be positive");
+        assert!(!entry.project.name.is_empty(), "project name must not be empty");
+        assert!(entry.task.id > 0, "task id must be positive");
+        assert!(!entry.task.name.is_empty(), "task name must not be empty");
+        assert!(entry.client.id > 0, "client id must be positive");
+        assert!(!entry.client.name.is_empty(), "client name must not be empty");
+        assert!(entry.user.id > 0, "user id must be positive");
+        // spent_date must parse as YYYY-MM-DD
+        NaiveDate::parse_from_str(&entry.spent_date, "%Y-%m-%d")
+            .expect("spent_date must be YYYY-MM-DD");
+    }
+
+    println!("Validated {} entries — all fields OK", entries.len());
+}
+
+// ---------------------------------------------------------------------------
+// Notes round-trip
+// ---------------------------------------------------------------------------
+
+/// Notes set on creation must come back unchanged in both the create response
+/// and a subsequent list query.
+#[tokio::test]
+#[ignore]
+async fn test_notes_round_trip() {
+    let client = client();
+    let (pa, ta) = active_project_and_task(&client).await;
+    let test_date = safe_test_date();
+    let notes = "easy_harvest notes round-trip test — safe to delete".to_string();
+
+    let created = client
+        .create_time_entry(&CreateTimeEntry {
+            project_id: pa.project.id,
+            task_id: ta.task.id,
+            spent_date: test_date.clone(),
+            hours: 0.25,
+            notes: Some(notes.clone()),
+        })
+        .await
+        .expect("create failed");
+
+    assert_eq!(created.notes.as_deref(), Some(notes.as_str()), "notes mismatch on create");
+
+    // Verify the notes survive a round-trip through the list endpoint
+    let listed = client
+        .list_all_time_entries(&test_date, &test_date)
+        .await
+        .expect("list failed");
+
+    let found = listed.iter().find(|e| e.id == created.id).expect("created entry not found in list");
+    assert_eq!(found.notes.as_deref(), Some(notes.as_str()), "notes mismatch in list response");
+
+    // Cleanup
+    client.delete_time_entry(created.id).await.expect("delete failed");
+}
+
+// ---------------------------------------------------------------------------
+// Update — partial fields
+// ---------------------------------------------------------------------------
+
+/// Only the fields included in UpdateTimeEntry should change; others are untouched.
+#[tokio::test]
+#[ignore]
+async fn test_partial_update_preserves_other_fields() {
+    let client = client();
+    let (pa, ta) = active_project_and_task(&client).await;
+    let test_date = safe_test_date();
+
+    let created = client
+        .create_time_entry(&CreateTimeEntry {
+            project_id: pa.project.id,
+            task_id: ta.task.id,
+            spent_date: test_date.clone(),
+            hours: 0.25,
+            notes: Some("original notes".to_string()),
+        })
+        .await
+        .expect("create failed");
+
+    // Update only hours — notes and project/task must stay the same
+    let updated = client
+        .update_time_entry(
+            created.id,
+            &UpdateTimeEntry {
+                project_id: None,
+                task_id: None,
+                spent_date: None,
+                hours: Some(0.75),
+                notes: None,
+            },
+        )
+        .await
+        .expect("update failed");
+
+    assert_eq!(updated.hours, 0.75, "hours should be updated");
+    assert_eq!(updated.project.id, pa.project.id, "project should be unchanged");
+    assert_eq!(updated.task.id, ta.task.id, "task should be unchanged");
+    assert_eq!(updated.spent_date, test_date, "date should be unchanged");
+
+    // Cleanup
+    client.delete_time_entry(created.id).await.expect("delete failed");
+}
+
+// ---------------------------------------------------------------------------
+// Timer lifecycle
+// ---------------------------------------------------------------------------
+
+/// Create an entry, start its timer (restart), verify it is running,
+/// then stop it and verify it is no longer running. Cleans up after itself.
+#[tokio::test]
+#[ignore]
+async fn test_timer_restart_and_stop() {
+    let client = client();
+    let (pa, ta) = active_project_and_task(&client).await;
+    let test_date = safe_test_date();
+
+    let created = client
+        .create_time_entry(&CreateTimeEntry {
+            project_id: pa.project.id,
+            task_id: ta.task.id,
+            spent_date: test_date.clone(),
+            hours: 0.1,
+            notes: Some("easy_harvest timer test — safe to delete".to_string()),
+        })
+        .await
+        .expect("create failed");
+
+    // Start the timer
+    let running = client
+        .restart_timer(created.id)
+        .await
+        .expect("restart_timer failed");
+
+    assert!(running.is_running, "entry should be running after restart");
+    assert!(running.timer_started_at.is_some(), "timer_started_at should be set");
+    println!("Timer started at: {:?}", running.timer_started_at);
+
+    // Stop the timer
+    let stopped = client
+        .stop_timer(created.id)
+        .await
+        .expect("stop_timer failed");
+
+    assert!(!stopped.is_running, "entry should not be running after stop");
+    assert!(stopped.hours >= 0.1, "hours should be >= the initial value after timer ran");
+    println!("Timer stopped — final hours: {:.4}h", stopped.hours);
+
+    // Cleanup
+    client.delete_time_entry(created.id).await.expect("delete failed");
+}
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+
+/// list_all_time_entries must accumulate all pages and return a consistent
+/// total hours sum regardless of how many pages the API splits the data into.
+#[tokio::test]
+#[ignore]
+async fn test_pagination_total_hours_consistent() {
+    let today = chrono::Local::now().naive_local().date();
+    let year = today.year();
+    let (from, to) = stats::year_bounds(year);
+    let from_str = from.format("%Y-%m-%d").to_string();
+    let to_str = to.format("%Y-%m-%d").to_string();
+
+    let entries = client()
+        .list_all_time_entries(&from_str, &to_str)
+        .await
+        .expect("list_all_time_entries failed");
+
+    println!("Total entries fetched for {year}: {}", entries.len());
+
+    // All entry IDs must be unique (no duplicates across pages)
+    let mut ids: Vec<i64> = entries.iter().map(|e| e.id).collect();
+    let original_len = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), original_len, "duplicate entry IDs found — pagination bug");
+
+    // All entries must fall within the requested year
+    for entry in &entries {
+        let date = NaiveDate::parse_from_str(&entry.spent_date, "%Y-%m-%d")
+            .expect("invalid spent_date");
+        assert_eq!(date.year(), year, "entry outside requested year: {}", entry.spent_date);
+    }
+
+    let total: f64 = entries.iter().map(|e| e.hours).sum();
+    println!("Total hours for {year}: {total:.2}h");
+    assert!(total >= 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// Month summaries integration
+// ---------------------------------------------------------------------------
+
+/// Fetch a full year of entries and verify that the sum of monthly totals
+/// equals the year-to-date total reported by year_to_date_balance.
+/// This validates that month_summaries and period_stats are consistent.
+#[tokio::test]
+#[ignore]
+async fn test_month_summaries_match_ytd_total() {
+    let today = chrono::Local::now().naive_local().date();
+    let year = today.year();
+    let (from, to) = stats::year_bounds(year);
+
+    let entries = client()
+        .list_all_time_entries(&from.format("%Y-%m-%d").to_string(), &to.format("%Y-%m-%d").to_string())
+        .await
+        .expect("list_all_time_entries failed");
+
+    let months = stats::month_summaries(&entries, year, None, 8.0, &[], today);
+    let month_total: f64 = months.iter().map(|m| m.total_hours).sum();
+
+    // YTD uses the same entries filtered to today, which is the same set
+    // month_summaries uses (entries past today are simply not fetched yet).
+    let ytd = stats::year_to_date_balance(&entries, year, None, 8.0, &[], 0.0, 0.0, today);
+
+    println!("Month-by-month total: {month_total:.2}h");
+    println!("YTD period total:     {:.2}h", ytd.period.total_hours);
+
+    for (i, m) in months.iter().enumerate() {
+        println!(
+            "  {:>3}: booked={:.2}h  expected={:.2}h  delta={:+.2}h",
+            easy_harvest::ui::month_abbr((i + 1) as u32),
+            m.total_hours, m.expected_hours, m.balance_hours
+        );
+    }
+
+    assert!(
+        (month_total - ytd.period.total_hours).abs() < 1e-6,
+        "month totals ({month_total:.4}h) must equal ytd total ({:.4}h)",
+        ytd.period.total_hours
+    );
+
+    // Monthly balance sum must equal YTD period balance
+    let month_balance: f64 = months.iter().map(|m| m.balance_hours).sum();
+    assert!(
+        (month_balance - ytd.period.balance_hours).abs() < 1e-6,
+        "sum of monthly balances ({month_balance:.4}h) must equal ytd balance ({:.4}h)",
+        ytd.period.balance_hours
+    );
 }

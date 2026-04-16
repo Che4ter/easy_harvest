@@ -49,7 +49,16 @@ mod platform {
         std::fs::create_dir_all(path.parent().expect("desktop path always has a parent"))
             .map_err(|e| e.to_string())?;
         let content = format!(
-            "[Desktop Entry]\nType=Application\nName=Easy Harvest\nExec=\"{}\"\nIcon=easy_harvest\nHidden=false\nX-GNOME-Autostart-enabled=true\n",
+            "[Desktop Entry]\n\
+             Type=Application\n\
+             Name=Easy Harvest\n\
+             Comment=Book and review Harvest time entries without opening the web UI\n\
+             Exec=\"{}\"\n\
+             Icon=easy_harvest\n\
+             Categories=Office;ProjectManagement;\n\
+             Keywords=harvest;time;tracking;\n\
+             Hidden=false\n\
+             X-GNOME-Autostart-enabled=true\n",
             exe.display()
         );
         std::fs::write(&path, content).map_err(|e| e.to_string())
@@ -131,9 +140,64 @@ mod platform {
     }
 }
 
-// ── Unsupported platforms (macOS, etc.) ───────────────────────────────────────
+// ── macOS ─────────────────────────────────────────────────────────────────────
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use std::path::PathBuf;
+
+    const LABEL: &str = "com.easyharvest";
+
+    fn plist_path() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("Library/LaunchAgents")
+            .join(format!("{LABEL}.plist"))
+    }
+
+    pub fn is_enabled() -> bool {
+        plist_path().exists()
+    }
+
+    pub fn enable() -> Result<(), String> {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_str = exe.to_string_lossy();
+        let path = plist_path();
+        std::fs::create_dir_all(path.parent().expect("plist path always has a parent"))
+            .map_err(|e| e.to_string())?;
+        let content = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
+             \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+             <plist version=\"1.0\">\n\
+             <dict>\n\
+             \t<key>Label</key>\n\
+             \t<string>{LABEL}</string>\n\
+             \t<key>ProgramArguments</key>\n\
+             \t<array>\n\
+             \t\t<string>{exe_str}</string>\n\
+             \t</array>\n\
+             \t<key>RunAtLoad</key>\n\
+             \t<true/>\n\
+             </dict>\n\
+             </plist>\n"
+        );
+        std::fs::write(&path, content).map_err(|e| e.to_string())
+    }
+
+    pub fn disable() -> Result<(), String> {
+        let path = plist_path();
+        if path.exists() {
+            std::fs::remove_file(path).map_err(|e| e.to_string())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+// ── Unsupported platforms ─────────────────────────────────────────────────────
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 mod platform {
     pub fn is_enabled() -> bool {
         false
