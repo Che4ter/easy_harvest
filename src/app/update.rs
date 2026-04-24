@@ -57,6 +57,27 @@ impl EasyHarvest {
             // ── Stats ──
             Message::Stats(msg) => self.update_stats(msg),
 
+            // ── Current user ──
+            Message::CurrentUserLoaded(result) => {
+                match result {
+                    Ok(id) => {
+                        self.harvest_user_id = Some(id);
+                        // Now that the user ID is known, kick off all pending
+                        // data loads so every request is properly filtered.
+                        self.loading = true;
+                        self.entries_gen += 1;
+                        Task::batch([
+                            self.load_entries_task(),
+                            self.load_assignments_task(),
+                        ])
+                    }
+                    Err(e) => {
+                        self.error_banner = Some(format!("Could not load user profile: {e}"));
+                        Task::none()
+                    }
+                }
+            }
+
             // ── Small inline arms ──
             Message::FontLoaded(_) => Task::none(),
 

@@ -103,7 +103,7 @@ async fn test_project_assignments() {
 async fn test_today_entries() {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let entries = client()
-        .list_all_time_entries(&today, &today)
+        .list_all_time_entries(None, &today, &today)
         .await
         .expect("list_all_time_entries failed");
 
@@ -202,7 +202,7 @@ async fn test_create_update_delete_entry() {
 
     // --- Verify deletion ---
     let entries_after = client
-        .list_all_time_entries(&test_date, &test_date)
+        .list_all_time_entries(None, &test_date, &test_date)
         .await
         .expect("list after delete failed");
 
@@ -247,7 +247,7 @@ async fn test_stats_current_month() {
     let (from, to) = stats::month_bounds(today.year(), today.month());
 
     let entries = client()
-        .list_all_time_entries(&from.to_string(), &to.to_string())
+        .list_all_time_entries(None, &from.to_string(), &to.to_string())
         .await
         .expect("list_all_time_entries failed");
 
@@ -279,7 +279,7 @@ async fn test_stats_holiday_year() {
     let (from, to) = stats::year_bounds(year);
 
     let entries = client()
-        .list_all_time_entries(&from.to_string(), &to.to_string())
+        .list_all_time_entries(None, &from.to_string(), &to.to_string())
         .await
         .expect("list_all_time_entries failed");
 
@@ -355,7 +355,7 @@ async fn test_date_range_boundaries() {
     let to_str = to.format("%Y-%m-%d").to_string();
 
     let entries = client()
-        .list_all_time_entries(&from_str, &to_str)
+        .list_all_time_entries(None, &from_str, &to_str)
         .await
         .expect("list_all_time_entries failed");
 
@@ -377,7 +377,7 @@ async fn test_single_day_range() {
     let today = chrono::Local::now().naive_local().date().format("%Y-%m-%d").to_string();
 
     let entries = client()
-        .list_all_time_entries(&today, &today)
+        .list_all_time_entries(None, &today, &today)
         .await
         .expect("list_all_time_entries failed");
 
@@ -405,7 +405,7 @@ async fn test_entry_fields_are_valid() {
     let to_str = today.format("%Y-%m-%d").to_string();
 
     let entries = client()
-        .list_all_time_entries(&from_str, &to_str)
+        .list_all_time_entries(None, &from_str, &to_str)
         .await
         .expect("list_all_time_entries failed");
 
@@ -462,7 +462,7 @@ async fn test_notes_round_trip() {
 
     // Verify the notes survive a round-trip through the list endpoint
     let listed = client
-        .list_all_time_entries(&test_date, &test_date)
+        .list_all_time_entries(None, &test_date, &test_date)
         .await
         .expect("list failed");
 
@@ -584,7 +584,7 @@ async fn test_pagination_total_hours_consistent() {
     let to_str = to.format("%Y-%m-%d").to_string();
 
     let entries = client()
-        .list_all_time_entries(&from_str, &to_str)
+        .list_all_time_entries(None, &from_str, &to_str)
         .await
         .expect("list_all_time_entries failed");
 
@@ -624,7 +624,7 @@ async fn test_month_summaries_match_ytd_total() {
     let (from, to) = stats::year_bounds(year);
 
     let entries = client()
-        .list_all_time_entries(&from.format("%Y-%m-%d").to_string(), &to.format("%Y-%m-%d").to_string())
+        .list_all_time_entries(None, &from.format("%Y-%m-%d").to_string(), &to.format("%Y-%m-%d").to_string())
         .await
         .expect("list_all_time_entries failed");
 

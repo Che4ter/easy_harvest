@@ -212,6 +212,9 @@ pub enum Message {
     WindowIdReceived(Option<window::Id>),
     WindowCloseRequested(window::Id),
 
+    // Current user — fetched on startup so we can filter time-entry requests
+    CurrentUserLoaded(Result<i64, String>),
+
     // Focus
     TabPressed { shift: bool },
 }
@@ -222,6 +225,10 @@ pub struct EasyHarvest {
     pub page: Page,
     pub settings: Settings,
     pub client: Option<HarvestClient>,
+    /// Harvest user-id of the authenticated account.
+    /// Used to filter `/time_entries` requests so that managers only see their
+    /// own entries and not those of every member on their projects.
+    pub harvest_user_id: Option<i64>,
     pub assignments: Vec<ProjectAssignment>,
     pub favorites: Favorites,
     pub current_date: NaiveDate,
@@ -388,6 +395,7 @@ impl EasyHarvest {
             page: initial_page.clone(),
             settings,
             client,
+            harvest_user_id: None,
             assignments: Vec::new(),
             favorites,
             current_date: today,
@@ -448,8 +456,7 @@ impl EasyHarvest {
         let task = if initial_page == Page::Day {
             state.loading = true;
             Task::batch([
-                state.load_entries_task(),
-                state.load_assignments_task(),
+                state.load_current_user_task(),
                 open_task.map(|id| Message::WindowIdReceived(Some(id))),
             ])
         } else {

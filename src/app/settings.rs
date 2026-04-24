@@ -159,6 +159,7 @@ impl EasyHarvest {
                 self.settings.account_id = String::new();
                 self.save_settings_or_warn();
                 self.client = None;
+                self.harvest_user_id = None;
                 self.assignments.clear();
                 self.assignments.shrink_to_fit();
                 self.entries.clear();
@@ -277,11 +278,11 @@ impl EasyHarvest {
                         };
                         self.client = Some(client);
                         self.loading = true;
-                        self.entries_gen += 1;
-                        let task = Task::batch([
-                            self.load_entries_task(),
-                            self.load_assignments_task(),
-                        ]);
+                        // Load the user ID first; once resolved, CurrentUserLoaded
+                        // will dispatch load_entries_task + load_assignments_task
+                        // so every request is filtered to the current user.
+                        self.harvest_user_id = None;
+                        let task = self.load_current_user_task();
                         self.page = Page::Day;
                         task
                     }

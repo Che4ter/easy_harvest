@@ -3,16 +3,36 @@ use super::*;
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
 impl EasyHarvest {
+    /// Fetch the current user's Harvest ID and store it in `harvest_user_id`.
+    /// This must be resolved before any time-entry listing task so that
+    /// manager-role accounts do not receive other users' entries.
+    pub(super) fn load_current_user_task(&self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                client
+                    .get_current_user()
+                    .await
+                    .map(|u| u.id)
+                    .map_err(|e| e.to_string())
+            },
+            Message::CurrentUserLoaded,
+        )
+    }
+
     pub(super) fn load_entries_task(&self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();
         };
         let date = self.current_date.format("%Y-%m-%d").to_string();
         let gen = self.entries_gen;
+        let user_id = self.harvest_user_id;
         Task::perform(
             async move {
                 client
-                    .list_all_time_entries(&date, &date)
+                    .list_all_time_entries(user_id, &date, &date)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -68,11 +88,12 @@ impl EasyHarvest {
         let first_work_day = self.settings.first_work_day;
         let adj_total = self.overtime_adjustments.adjustments_total(year);
         let gen = self.stats_gen;
+        let user_id = self.harvest_user_id;
 
         Task::perform(
             async move {
                 let all_entries = client
-                    .list_all_time_entries(&from, &to)
+                    .list_all_time_entries(user_id, &from, &to)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -126,10 +147,11 @@ impl EasyHarvest {
         let from = format!("{year}-01-01");
         let to = format!("{year}-12-31");
         let gen = self.vacation_gen;
+        let user_id = self.harvest_user_id;
         Task::perform(
             async move {
                 client
-                    .list_all_time_entries(&from, &to)
+                    .list_all_time_entries(user_id, &from, &to)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -160,10 +182,11 @@ impl EasyHarvest {
             }
         };
         let gen = self.billable_gen;
+        let user_id = self.harvest_user_id;
         Task::perform(
             async move {
                 client
-                    .list_all_time_entries(&from, &to)
+                    .list_all_time_entries(user_id, &from, &to)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -337,10 +360,11 @@ impl EasyHarvest {
             .flat_map(|b| b.project_ids.iter().copied())
             .collect();
 
+        let user_id = self.harvest_user_id;
         Task::perform(
             async move {
                 let all_entries = client
-                    .list_all_time_entries(&from, &to)
+                    .list_all_time_entries(user_id, &from, &to)
                     .await
                     .map_err(|e| e.to_string())?;
                 let filtered: Vec<_> = all_entries

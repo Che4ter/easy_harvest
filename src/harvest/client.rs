@@ -115,6 +115,7 @@ impl HarvestClient {
 
     async fn list_time_entries(
         &self,
+        user_id: Option<i64>,
         from: Option<&str>,
         to: Option<&str>,
         page: Option<i64>,
@@ -122,6 +123,9 @@ impl HarvestClient {
         let resp = self
             .send_with_retry(|| {
                 let mut req = self.request(reqwest::Method::GET, "/time_entries");
+                if let Some(uid) = user_id {
+                    req = req.query(&[("user_id", &uid.to_string())]);
+                }
                 if let Some(from) = from {
                     req = req.query(&[("from", from)]);
                 }
@@ -139,15 +143,20 @@ impl HarvestClient {
     }
 
     /// Fetch all time entries for a date range, handling pagination.
+    ///
+    /// Pass `user_id: Some(id)` to restrict results to a single user.  This is
+    /// required when the caller has a manager role; without it the Harvest API
+    /// returns entries for every member of the managed projects.
     pub async fn list_all_time_entries(
         &self,
+        user_id: Option<i64>,
         from: &str,
         to: &str,
     ) -> Result<Vec<TimeEntry>, HarvestError> {
         let mut all_entries = Vec::new();
         let mut page = 1;
         loop {
-            let resp = self.list_time_entries(Some(from), Some(to), Some(page)).await?;
+            let resp = self.list_time_entries(user_id, Some(from), Some(to), Some(page)).await?;
             all_entries.extend(resp.time_entries);
             if page >= resp.total_pages {
                 break;
