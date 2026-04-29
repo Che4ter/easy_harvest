@@ -141,6 +141,14 @@ pub enum SettingsMsg {
     TemplateAddNotesChanged(String),
     TemplateAddSave,
     TemplateDelete(usize),
+
+    /// Kick off background stats-fetch for every past year whose carryover[year+1] is
+    /// still missing.  Triggered automatically on startup and by the Reset button.
+    CarryoverSyncStart,
+    /// Background carryover fetch for one year completed.
+    CarryoverSyncLoaded(i32, Result<(crate::stats::YearBalance, crate::stats::HolidayStats), String>),
+    /// Clear all auto-computed carryover entries, re-seed, and re-run CarryoverSyncStart.
+    CarryoverReset,
 }
 
 impl EasyHarvest {
@@ -389,6 +397,65 @@ impl EasyHarvest {
                 self.save_settings_or_warn();
                 self.recompute_vacation_summary();
                 Task::none()
+            }
+
+            SettingsMsg::CarryoverReset => {
+                // Clear all auto-computed entries and keep only the first-year seed.
+                self.settings.carryover.clear();
+                if let Some(fwd) = self.settings.first_work_day {
+                    self.settings.carryover
+                        .entry(fwd.year())
+                        .or_insert_with(Default::default);
+                }
+                self.save_settings_or_warn();
+                self.recompute_vacation_summary();
+                // Re-run background sync for all past years.
+                self.update_settings(SettingsMsg::CarryoverSyncStart)
+            }
+
+            SettingsMsg::CarryoverSyncStart => {
+                let current_year = Local::now().naive_local().date().year();
+                let Some(fwd) = self.settings.first_work_day else {
+                    return Task::none();
+                };
+                let start = fwd.year();
+                // Years must be loaded sequentially: carryover[N] depends on the
+                // computed result of year N-1.  Fire only the first missing year;
+                // CarryoverSyncLoaded will chain to the next one when it arrives.
+                if let Some(first_missing) = (start..current_year)
+                    .find(|&y| !self.settings.carryover.contains_key(&(y + 1)))
+                {
+                    self.load_carryover_sync_task(first_missing)
+                } else {
+                    Task::none()
+                }
+            }
+
+            SettingsMsg::CarryoverSyncLoaded(year, result) => {
+                match result {
+                    Ok((balance, holidays)) => {
+                        let next = year + 1;
+                        let epd = self.settings.expected_hours_per_day();
+                        self.settings.carryover.insert(
+                            next,
+                            crate::state::settings::YearCarryover {
+                                overtime_hours: balance.total_balance,
+                                holiday_hours: holidays.days_remaining * epd,
+                                ..Default::default()
+                            },
+                        );
+                        let _ = self.settings.save();
+                        self.recompute_vacation_summary();
+                    }
+                    Err(e) => {
+                        // Non-fatal: silently ignore background errors to avoid
+                        // spamming the user.  The entry will simply remain absent
+                        // and can be retried via the Reset button.
+                        let _ = e;
+                    }
+                }
+                // Chain to the next missing year (if any).
+                self.update_settings(SettingsMsg::CarryoverSyncStart)
             }
 
             SettingsMsg::SaveProfile => {

@@ -219,9 +219,10 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
 
             let del_btn = super::delete_chip_btn(Message::Settings(SettingsMsg::CarryoverDelete(year)));
 
-            // Year chip
+            // Year chip — shows "PREV → YEAR" to clarify this is unused balance
+            // from the prior year carried into `year`.
             let year_chip = container(
-                text(year.to_string()).font(FONT_SEMIBOLD).size(13).color(ACCENT),
+                text(format!("{} → {}", year - 1, year)).font(FONT_SEMIBOLD).size(13).color(ACCENT),
             )
             .style(|_| super::accent_chip_style(0.12, 0.30))
             .padding([4, 10]);
@@ -272,56 +273,16 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
     };
 
     // Add form — three labeled fields + button
-    let feedback: Element<Message> = if let Some(err) = &state.settings_form.carryover_error {
-        text(err.as_str()).font(FONT_REGULAR).size(12).color(DANGER).into()
-    } else {
-        Space::new().into()
-    };
-
-    let add_form = row![
-        // Year field
-        column![
-            caption("Year"),
-            text_input("2026", &state.settings_form.carryover_year_input)
-                .on_input(|v| Message::Settings(SettingsMsg::CarryoverYearChanged(v)))
-                .size(13).padding([7, 8]).style(input_style).width(64),
-        ]
-        .spacing(super::FORM_FIELD_GAP),
-        Space::new().width(8).height(8),
-        // Holiday hours field
-        column![
-            caption("Vacation hours"),
-            text_input("0.0", &state.settings_form.carryover_holiday_input)
-                .on_input(|v| Message::Settings(SettingsMsg::CarryoverHolidayChanged(v)))
-                .size(13).padding([7, 8]).style(input_style).width(72),
-        ]
-        .spacing(super::FORM_FIELD_GAP),
-        Space::new().width(8).height(8),
-        // OT hours field
-        column![
-            caption("Overtime hours"),
-            text_input("0.0", &state.settings_form.carryover_overtime_input)
-                .on_input(|v| Message::Settings(SettingsMsg::CarryoverOvertimeChanged(v)))
-                .size(13).padding([7, 8]).style(input_style).width(72),
-        ]
-        .spacing(super::FORM_FIELD_GAP),
-        Space::new().width(12).height(12),
-        // Add button aligned to bottom of fields
-        column![
-            Space::new(), // matches label + gap height
-            primary_btn("+ Add")
-                .on_press(Message::Settings(SettingsMsg::CarryoverSave)),
-        ],
-    ]
-    .align_y(Alignment::End);
-
     container(
         column![
             section_heading("Carryover"),
-            caption("Balances brought over from the previous year."),
+            caption("Unused vacation days and overtime from the end of each year are carried into the next year. Computed automatically — delete an entry to force recalculation."),
             list,
-            add_form,
-            feedback,
+            row![
+                Space::new().width(Length::Fill),
+                outline_btn_sm("↺ Recalculate All")
+                    .on_press(Message::Settings(SettingsMsg::CarryoverReset)),
+            ],
         ]
         .spacing(SECTION_GAP),
     )

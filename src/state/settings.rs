@@ -268,6 +268,16 @@ impl Settings {
             });
         settings.data_dir = data_dir.to_path_buf();
         settings.autostart = crate::autostart::is_enabled();
+        // Seed year-0 carryover (both 0) so the auto-compute chain has a known
+        // starting point.  Only inserted when first_work_day is configured and
+        // no entry exists yet — never overwrites a user-defined value.
+        if let Some(fwd) = settings.first_work_day {
+            settings.carryover.entry(fwd.year()).or_insert_with(|| YearCarryover {
+                overtime_hours: 0.0,
+                holiday_hours: 0.0,
+                ..Default::default()
+            });
+        }
         settings
     }
 

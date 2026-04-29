@@ -69,6 +69,8 @@ impl EasyHarvest {
                         Task::batch([
                             self.load_entries_task(),
                             self.load_assignments_task(),
+                            // Background: compute any missing carryover entries.
+                            self.update_settings(SettingsMsg::CarryoverSyncStart),
                         ])
                     }
                     Err(e) => {

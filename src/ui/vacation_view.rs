@@ -95,11 +95,11 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
     let rem_color = if days_remaining <= 5.0 { DANGER } else { SUCCESS };
 
     let summary_row = row![
-        stat_chip("Used",      format!("{:.1}", used_days),      format!("({:.1}h)", used_days      * expected_per_day), ACCENT),
+        stat_chip("Used",      format!("{:.2}", used_days),      format!("({:.2}h)", used_days      * expected_per_day), ACCENT),
         Space::new().width(8).height(8),
-        stat_chip("Planned",   format!("{:.1}", booked_days),    format!("({:.1}h)", booked_days    * expected_per_day), PLANNED_COLOR),
+        stat_chip("Planned",   format!("{:.2}", booked_days),    format!("({:.2}h)", booked_days    * expected_per_day), PLANNED_COLOR),
         Space::new().width(8).height(8),
-        stat_chip("Remaining", format!("{:.1}", days_remaining), format!("({:.1}h)", days_remaining * expected_per_day), rem_color),
+        stat_chip("Remaining", format!("{:.2}", days_remaining), format!("({:.2}h)", days_remaining * expected_per_day), rem_color),
     ];
 
     // Add form
@@ -133,20 +133,26 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
             year_row,
             summary_row,
             {
-                let carryover_str = if carryover_days != 0.0 {
+                let caption_text = if carryover_days != 0.0 {
+                    let base_days = total_days - carryover_days;
                     format!(
-                        " (incl. {}{:.1}d carryover)",
-                        if carryover_days > 0.0 { "+" } else { "" },
-                        carryover_days,
+                        "{:.2}d base {}{:.2}d ({:.2}h) carried over from {} = {:.2} days  ({:.2}h)",
+                        base_days,
+                        if carryover_days > 0.0 { "+ " } else { "- " },
+                        carryover_days.abs(),
+                        carryover_days.abs() * expected_per_day,
+                        year - 1,
+                        total_days,
+                        total_days * expected_per_day,
                     )
                 } else {
-                    String::new()
+                    format!(
+                        "{:.2} days total entitlement  ({:.2}h)",
+                        total_days,
+                        total_days * expected_per_day,
+                    )
                 };
-                caption(format!(
-                    "{:.1} days total entitlement{carryover_str}  ({:.1}h)",
-                    total_days,
-                    total_days * expected_per_day
-                ))
+                caption(caption_text)
             },
             form_el,
             body,
@@ -164,8 +170,8 @@ fn vacation_form_view<'a>(form: &VacationForm, expected_per_day: f64, state: &'a
     let half_h = expected_per_day / 2.0;
     let full_h = expected_per_day;
 
-    let full_label = format!("Full day  ({:.1}h)", full_h);
-    let half_label = format!("Half day  ({:.1}h)", half_h);
+    let full_label = format!("Full day  ({:.2}h)", full_h);
+    let half_label = format!("Half day  ({:.2}h)", half_h);
     let full_day = form.full_day;
 
     let full_btn = button(text(full_label).font(FONT_MEDIUM).size(12))
@@ -302,11 +308,11 @@ fn vacation_row(
 
     let days = entry.hours / expected_per_day;
     let day_str = if (days - 1.0).abs() < 0.02 {
-        format!("1 day  ({:.1}h)", entry.hours)
+        format!("1 day  ({:.2}h)", entry.hours)
     } else if (days - 0.5).abs() < 0.02 {
-        format!("½ day  ({:.1}h)", entry.hours)
+        format!("½ day  ({:.2}h)", entry.hours)
     } else {
-        format!("{:.1} days  ({:.1}h)", days, entry.hours)
+        format!("{:.2} days  ({:.2}h)", days, entry.hours)
     };
 
     let hours_color = if is_future { PLANNED_COLOR } else { ACCENT };

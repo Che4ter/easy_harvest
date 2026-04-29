@@ -138,6 +138,64 @@ impl EasyHarvest {
         )
     }
 
+    /// Background task: load stats for a specific past `year` to derive carryover into
+    /// `year + 1`.  Does NOT affect `self.overtime_year` or any loading state.
+    pub(super) fn load_carryover_sync_task(&self, year: i32) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let from = format!("{year}-01-01");
+        let to = format!("{year}-12-31");
+        // Past years always use Dec 31 as the balance end.
+        let balance_end = chrono::NaiveDate::from_ymd_opt(year, 12, 31)
+            .expect("year is always valid");
+        let balance_end_str = balance_end.format("%Y-%m-%d").to_string();
+        let expected_per_day = self.settings.expected_hours_per_day();
+        let public_holidays = swiss_public_holidays(year);
+        let carryover = self.settings.overtime_carryover_for(year);
+        let holiday_task_ids = self.settings.holiday_task_ids.clone();
+        let total_holiday_days = self.settings.effective_holiday_days_for(year);
+        let first_work_day = self.settings.first_work_day;
+        let adj_total = self.overtime_adjustments.adjustments_total(year);
+        let user_id = self.harvest_user_id;
+
+        Task::perform(
+            async move {
+                let all_entries = client
+                    .list_all_time_entries(user_id, &from, &to)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let ytd_entries: Vec<_> = all_entries
+                    .iter()
+                    .filter(|e| e.spent_date.as_str() <= balance_end_str.as_str())
+                    .cloned()
+                    .collect();
+
+                let effective_start = first_work_day.filter(|d| d.year() == year);
+                let balance = year_to_date_balance(
+                    &ytd_entries,
+                    year,
+                    effective_start,
+                    expected_per_day,
+                    &public_holidays,
+                    carryover,
+                    adj_total,
+                    balance_end,
+                );
+                let holidays = crate::stats::holiday_stats(
+                    &all_entries,
+                    year,
+                    &holiday_task_ids,
+                    total_holiday_days,
+                    expected_per_day,
+                );
+                Ok((balance, holidays))
+            },
+            move |result| Message::Settings(SettingsMsg::CarryoverSyncLoaded(year, result)),
+        )
+    }
+
     pub(super) fn load_vacation_task(&self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();

@@ -104,6 +104,29 @@ impl EasyHarvest {
                         self.year_balance = Some(balance);
                         self.holiday_stats = Some(holidays);
                         self.month_summaries = Some(months);
+                        // Persist derived carryover into settings.json so the next year
+                        // picks it up automatically.  Past years are immutable so this
+                        // only needs to run once; existing (manual) entries are preserved.
+                        let year = self.overtime_year;
+                        if year < Local::now().naive_local().date().year() {
+                            let next = year + 1;
+                            if !self.settings.carryover.contains_key(&next) {
+                                if let (Some(bal), Some(hols)) =
+                                    (&self.year_balance, &self.holiday_stats)
+                                {
+                                    let epd = self.settings.expected_hours_per_day();
+                                    self.settings.carryover.insert(
+                                        next,
+                                        crate::state::settings::YearCarryover {
+                                            overtime_hours: bal.total_balance,
+                                            holiday_hours: hols.days_remaining * epd,
+                                            ..Default::default()
+                                        },
+                                    );
+                                    let _ = self.settings.save();
+                                }
+                            }
+                        }
                     }
                     Err(e) => self.error_banner = Some(e),
                 }
