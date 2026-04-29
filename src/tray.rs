@@ -9,6 +9,8 @@ use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
 use crate::state::work_day::WorkPhase;
 
 // Pre-computed RGBA8 pixel data committed to assets/.
+// 64×64 source — tray-icon treats the buffer as @1x logical pixels, so on a
+// 2× Retina display this renders as a crisp 32pt icon without upscaling.
 const TRAY_32: &[u8] = include_bytes!("../assets/tray_32.rgba8");
 
 #[derive(Debug, Clone)]
@@ -137,7 +139,7 @@ fn spawn_tray_thread(
             }
 
             // Build initial menu and icon.
-            let icon = match Icon::from_rgba(TRAY_32.to_vec(), 32, 32) {
+            let icon = match Icon::from_rgba(TRAY_32.to_vec(), 64, 64) {
                 Ok(i) => i,
                 Err(e) => {
                     let _ = ready_tx.send(Err(format!("Icon error: {e}")));

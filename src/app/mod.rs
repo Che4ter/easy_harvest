@@ -316,9 +316,9 @@ fn window_settings() -> window::Settings {
 }
 
 fn window_icon() -> Option<window::Icon> {
-    // RGBA8 64×64 data committed to assets/.
+    // RGBA8 128×128 — crisp on 2× Retina; the OS downscales for standard DPI.
     const DATA: &[u8] = include_bytes!("../../assets/window_64.rgba8");
-    window::icon::from_rgba(DATA.to_vec(), 64, 64).ok()
+    window::icon::from_rgba(DATA.to_vec(), 128, 128).ok()
 }
 
 fn window_title(_state: &EasyHarvest, _window: window::Id) -> String {
