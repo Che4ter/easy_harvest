@@ -316,8 +316,8 @@ fn window_settings() -> window::Settings {
 }
 
 fn window_icon() -> Option<window::Icon> {
-    // RGBA8 64×64 data pre-computed at build time by build.rs.
-    const DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/window_64.rgba8"));
+    // RGBA8 64×64 data committed to assets/.
+    const DATA: &[u8] = include_bytes!("../../assets/window_64.rgba8");
     window::icon::from_rgba(DATA.to_vec(), 64, 64).ok()
 }
 

@@ -8,8 +8,8 @@ use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
 
 use crate::state::work_day::WorkPhase;
 
-// Pre-computed RGBA8 pixel data generated at build time by build.rs.
-const TRAY_32: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tray_32.rgba8"));
+// Pre-computed RGBA8 pixel data committed to assets/.
+const TRAY_32: &[u8] = include_bytes!("../assets/tray_32.rgba8");
 
 #[derive(Debug, Clone)]
 pub enum TrayAction {

@@ -68,7 +68,7 @@ mod platform {
     /// `Icon=easy_harvest` resolves in both the autostart `.desktop` and any
     /// manually-installed launcher entry.
     pub fn install_icon() {
-        const ICON_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/easy_harvest_128.png"));
+        const ICON_PNG: &[u8] = include_bytes!("../assets/easy_harvest_128.png");
 
         let Some(data_home) = dirs::data_dir() else { return; };
         let icon_dir = data_home.join("icons/hicolor/128x128/apps");

@@ -1023,7 +1023,6 @@ dependencies = [
  "dirs",
  "gtk",
  "iced",
- "image",
  "keyring",
  "reqwest",
  "rfd",

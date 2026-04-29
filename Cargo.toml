@@ -56,12 +56,12 @@ windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 name = "Easy Harvest"
 identifier = "com.easyharvest"
 icon = [
-    "target/icons/icon_16.png",
-    "target/icons/icon_32.png",
-    "target/icons/icon_128.png",
-    "target/icons/icon_256.png",
-    "target/icons/icon_512.png",
-    "target/icons/icon_1024.png",
+    "assets/icons/icon_16.png",
+    "assets/icons/icon_32.png",
+    "assets/icons/icon_128.png",
+    "assets/icons/icon_256.png",
+    "assets/icons/icon_512.png",
+    "assets/icons/icon_1024.png",
 ]
 short_description = "Quick Harvest time entry booking from your desktop"
 long_description = "Book and review Harvest time entries without opening the web UI."
@@ -70,7 +70,6 @@ category = "Productivity"
 osx_minimum_system_version = "12.0"
 
 [build-dependencies]
-image = { version = "0.25", default-features = false, features = ["png", "ico"] }
 winresource = "0.1"
 
 [dev-dependencies]
