@@ -57,7 +57,7 @@ fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let icons_dir = std::path::Path::new(&manifest_dir).join("target").join("icons");
     std::fs::create_dir_all(&icons_dir).expect("create target/icons");
-    for &sz in &[16u32, 32, 64, 128, 256, 512, 1024] {
+    for &sz in &[16u32, 32, 128, 256, 512, 1024] {
         let resized = logo.resize_exact(sz, sz, FilterType::Lanczos3);
         resized
             .save(icons_dir.join(format!("icon_{sz}.png")))
