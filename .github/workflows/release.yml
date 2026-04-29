@@ -19,11 +19,11 @@ jobs:
         include:
           - name: Linux x86_64
             runner: ubuntu-22.04
-            asset: easy_harvest-linux-x86_64.tar.gz
+            asset: easy_harvest-linux-x86_64
 
           - name: Windows x86_64
             runner: windows-latest
-            asset: easy_harvest-windows-x86_64.zip
+            asset: easy_harvest-windows-x86_64.exe
 
           - name: macOS (Apple Silicon)
             runner: macos-latest
@@ -84,12 +84,12 @@ jobs:
       # ── Package ─────────────────────────────────────────────────────────────
       - name: Package (Linux)
         if: runner.os == 'Linux'
-        run: tar -czf ${{ matrix.asset }} -C target/release easy_harvest
+        run: cp target/release/easy_harvest ${{ matrix.asset }}
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path target\release\easy_harvest.exe -DestinationPath ${{ matrix.asset }}
+        run: Copy-Item target\release\easy_harvest.exe ${{ matrix.asset }}
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
