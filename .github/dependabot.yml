@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Keep GitHub Actions pinned-SHA references current.
+  # Dependabot will open a PR whenever a new release of a used action is
+  # available, updating both the SHA and the human-readable comment tag.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+
+  # Keep Cargo dependencies current.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly

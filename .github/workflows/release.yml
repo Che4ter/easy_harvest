@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Default to read-only. The upload job explicitly elevates to contents:write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build — ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-22.04
+            asset: easy_harvest-linux-x86_64.tar.gz
+
+          - name: Windows x86_64
+            runner: windows-latest
+            asset: easy_harvest-windows-x86_64.zip
+
+          - name: macOS (Apple Silicon)
+            runner: macos-latest
+            asset: easy_harvest-macos-aarch64.zip
+
+    # contents:write is scoped to this job only so only the upload step can
+    # create/modify the release.  All other jobs stay read-only.
+    permissions:
+      contents: write
+
+    steps:
+      # Pin every action to a full commit SHA to prevent supply-chain attacks.
+      # If a tag is later moved to malicious code the pinned SHA won't follow.
+      # Renovate / Dependabot can keep these up to date automatically.
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      # Cache the Cargo registry to speed up dependency downloads.
+      - name: Cache Cargo registry
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # GTK 3 and D-Bus headers are required for the Linux tray icon.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libdbus-1-dev
+
+      # ── Linux & Windows: plain cargo build ──────────────────────────────────
+      - name: Build (Linux / Windows)
+        if: runner.os != 'macOS'
+        run: cargo build --release
+
+      # ── macOS: use cargo-bundle to produce a proper .app ────────────────────
+      # cargo-bundle calls cargo build internally, which runs build.rs and
+      # generates the correctly-sized icons in target/icons/ before bundling.
+      - name: Install cargo-bundle (macOS)
+        if: runner.os == 'macOS'
+        run: cargo install cargo-bundle --locked
+
+      - name: Build & bundle (macOS)
+        if: runner.os == 'macOS'
+        run: cargo bundle --release
+
+      # ── Strip to reduce binary size (not available / needed on Windows) ─────
+      - name: Strip binary (Linux)
+        if: runner.os == 'Linux'
+        run: strip target/release/easy_harvest
+
+      # ── Package ─────────────────────────────────────────────────────────────
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tar -czf ${{ matrix.asset }} -C target/release easy_harvest
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path target\release\easy_harvest.exe -DestinationPath ${{ matrix.asset }}
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd "target/release/bundle/osx"
+          zip -r "${{ github.workspace }}/${{ matrix.asset }}" "Easy Harvest.app"
+
+      # ── Upload to the GitHub release created by the tag push ─────────────────
+      - name: Upload to release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: ${{ matrix.asset }}
+          # Auto-generate release notes from commits since the last tag.
+          generate_release_notes: true
