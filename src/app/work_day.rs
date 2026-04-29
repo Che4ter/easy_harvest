@@ -92,14 +92,13 @@ impl EasyHarvest {
                 // Record the gap as a break only when the stored end time is
                 // genuinely in the past — a manually entered future end time
                 // would produce an inverted break (start > end).
-                if let Some(ended_at) = day.end_time {
-                    if ended_at < now.time() {
+                if let Some(ended_at) = day.end_time
+                    && ended_at < now.time() {
                         day.breaks.push(crate::state::work_day::Break {
                             start: ended_at,
                             end: Some(now.time()),
                         });
                     }
-                }
                 day.end_time = None;
                 self.work_day_store.set(day);
                 self.save_work_day();
@@ -201,12 +200,11 @@ impl EasyHarvest {
                 }
 
                 // Validate envelope: end must be after start when both are set.
-                if let (Some(s), Some(e)) = (day.start_time, day.end_time) {
-                    if e <= s {
+                if let (Some(s), Some(e)) = (day.start_time, day.end_time)
+                    && e <= s {
                         self.error_banner = Some("End time must be after start time".into());
                         return Task::none();
                     }
-                }
 
                 let mut break_errors = false;
                 let breaks: Vec<_> = self.work_day_edit.break_inputs.iter().filter_map(|(s, e)| {

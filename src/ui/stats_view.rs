@@ -152,7 +152,13 @@ fn build_monthly_breakdown(state: &EasyHarvest) -> Element<'_, Message> {
         12
     };
 
-    let mut running = 0.0_f64;
+    // Seed the running total with carryover + manual adjustments so that the
+    // "Status" column stays in sync with the headline balance figure above.
+    let mut running = state
+        .year_balance
+        .as_ref()
+        .map(|b| b.carryover_hours + b.manual_adjustments_hours)
+        .unwrap_or(0.0);
     let rows: Vec<Element<Message>> = months
         .iter()
         .filter(|m| m.month <= max_month && (m.total_hours > 0.0 || m.expected_hours > 0.0))

@@ -50,6 +50,20 @@ fn main() {
         encoder.encode_images(&images).expect("write ico");
     }
 
+    // ── macOS bundle icons ────────────────────────────────────────────────────
+    // cargo-bundle requires PNG files at standard macOS icon sizes (16, 32, 64,
+    // 128, 256, 512, 1024).  Write them to target/icons/ (already gitignored)
+    // so Cargo.toml can reference them without committing binary assets.
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let icons_dir = std::path::Path::new(&manifest_dir).join("target").join("icons");
+    std::fs::create_dir_all(&icons_dir).expect("create target/icons");
+    for &sz in &[16u32, 32, 64, 128, 256, 512, 1024] {
+        let resized = logo.resize_exact(sz, sz, FilterType::Lanczos3);
+        resized
+            .save(icons_dir.join(format!("icon_{sz}.png")))
+            .unwrap_or_else(|e| panic!("save icon_{sz}.png: {e}"));
+    }
+
     // Embed the .ico as a Windows PE resource when targeting Windows,
     // regardless of the host OS (supports cross-compilation).
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {

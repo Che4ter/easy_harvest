@@ -50,11 +50,10 @@ impl WorkDay {
         if self.end_time.is_some() {
             return WorkPhase::Ended;
         }
-        if let Some(last) = self.breaks.last() {
-            if last.end.is_none() {
+        if let Some(last) = self.breaks.last()
+            && last.end.is_none() {
                 return WorkPhase::OnBreak;
             }
-        }
         WorkPhase::Working
     }
 
@@ -74,20 +73,18 @@ impl WorkDay {
 
     /// End the current (last) open break.
     pub fn end_break(&mut self, time: NaiveTime) {
-        if let Some(last) = self.breaks.last_mut() {
-            if last.end.is_none() {
+        if let Some(last) = self.breaks.last_mut()
+            && last.end.is_none() {
                 last.end = Some(time);
             }
-        }
     }
 
     /// End the work day.  Automatically closes an open break.
     pub fn end(&mut self, time: NaiveTime) {
-        if let Some(last) = self.breaks.last_mut() {
-            if last.end.is_none() {
+        if let Some(last) = self.breaks.last_mut()
+            && last.end.is_none() {
                 last.end = Some(time);
             }
-        }
         self.end_time = Some(time);
     }
 

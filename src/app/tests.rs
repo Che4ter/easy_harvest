@@ -436,3 +436,21 @@ fn adj_form_validate_empty_reason() {
     };
     assert!(form.validate(2025).is_err());
 }
+
+#[test]
+fn validate_carryover_zero_values_are_valid() {
+    // Zero carryover (explicitly clearing a balance) must be accepted.
+    let f = carryover_form("2025", "0", "0");
+    let c = f.validate_carryover().unwrap();
+    assert_eq!(c.year, 2025);
+    assert_eq!(c.holiday_hours, 0.0);
+    assert_eq!(c.overtime_hours, 0.0);
+}
+
+#[test]
+fn validate_carryover_negative_overtime_is_valid() {
+    // A negative overtime carryover (debt from prior year) must be accepted.
+    let f = carryover_form("2026", "0", "-8.2");
+    let c = f.validate_carryover().unwrap();
+    assert!((c.overtime_hours - (-8.2)).abs() < f64::EPSILON);
+}

@@ -207,8 +207,6 @@ fn profile_section(state: &EasyHarvest) -> Element<'_, Message> {
 // ── Carryover section ─────────────────────────────────────────────────────────
 
 fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
-    let epd = state.settings.expected_hours_per_day();
-
     // Collect existing entries sorted by year descending
     let mut entries: Vec<(i32, &crate::state::settings::YearCarryover)> =
         state.settings.carryover.iter().map(|(y, c)| (*y, c)).collect();
@@ -233,7 +231,7 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
             let values = row![
                 caption("Vacation"),
                 Space::new().width(4).height(4),
-                text(format!("{:.1}h", c.holiday_days * epd))
+                text(format!("{:.1}h", c.holiday_hours))
                     .font(FONT_SEMIBOLD).size(12).color(TEXT_PRIMARY),
                 Space::new().width(16).height(16),
                 container(Space::new().width(1).height(1))

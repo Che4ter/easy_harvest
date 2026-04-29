@@ -96,8 +96,8 @@ impl EasyHarvest {
                 }
             }
 
-            StatsMsg::Loaded(gen, result) => {
-                if gen != self.stats_gen { return Task::none(); }
+            StatsMsg::Loaded(r#gen, result) => {
+                if r#gen != self.stats_gen { return Task::none(); }
                 self.loading = false;
                 match result {
                     Ok((balance, holidays, months)) => {
@@ -173,9 +173,19 @@ impl EasyHarvest {
 
             StatsMsg::AdjDelete(id) => {
                 let year = self.overtime_year;
+                // Stash the item before removing it so we can roll back on save failure.
+                let removed: Vec<_> = self.overtime_adjustments
+                    .adjustments_for(year)
+                    .iter()
+                    .filter(|a| a.id == id)
+                    .cloned()
+                    .collect();
                 self.overtime_adjustments.adjustments_for_mut(year).retain(|a| a.id != id);
                 if let Err(e) = self.overtime_adjustments.save(&self.settings.data_dir) {
+                    // Roll back so displayed data matches disk.
+                    self.overtime_adjustments.adjustments_for_mut(year).extend(removed);
                     self.error_banner = Some(format!("Failed to save adjustments: {e}"));
+                    return Task::none();
                 }
                 // Refresh stats to reflect the deletion
                 Task::done(Message::Stats(StatsMsg::Refresh))

@@ -63,6 +63,7 @@ To distribute as a proper `.app` bundle (so the app appears in Finder and Spotli
 
 ```sh
 cargo install cargo-bundle
+cargo build --release   # generates icon PNGs in target/icons/ needed by cargo-bundle
 cargo bundle --release
 ```
 

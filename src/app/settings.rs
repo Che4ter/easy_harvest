@@ -19,6 +19,8 @@ pub struct SettingsFormState {
     pub carryover_holiday_input: String,
     pub carryover_overtime_input: String,
     pub carryover_error: Option<String>,
+    /// Set to the year being overwritten while waiting for the user to confirm.
+    pub carryover_overwrite_confirm: Option<i32>,
     pub holiday_view_year: i32,
     pub cached_holidays: Vec<PublicHoliday>,
     pub holiday_task_query: String,
@@ -119,6 +121,7 @@ pub enum SettingsMsg {
     CarryoverHolidayChanged(String),
     CarryoverOvertimeChanged(String),
     CarryoverSave,
+    CarryoverConfirmOverwrite,
     CarryoverDelete(i32),
     HolidayTaskToggle(i64),
     HolidayTaskQueryChanged(String),
@@ -319,6 +322,9 @@ impl EasyHarvest {
 
             SettingsMsg::CarryoverYearChanged(v) => {
                 self.settings_form.carryover_year_input = v;
+                // Reset the overwrite-confirm state when the year changes.
+                self.settings_form.carryover_overwrite_confirm = None;
+                self.settings_form.carryover_error = None;
                 Task::none()
             }
 
@@ -340,10 +346,23 @@ impl EasyHarvest {
                         return Task::none();
                     }
                 };
-                let epd = self.settings.expected_hours_per_day();
+                // If an entry for this year already exists, ask for confirmation
+                // instead of silently overwriting.
+                if self.settings.carryover.contains_key(&validated.year)
+                    && self.settings_form.carryover_overwrite_confirm != Some(validated.year)
+                {
+                    self.settings_form.carryover_overwrite_confirm = Some(validated.year);
+                    self.settings_form.carryover_error = Some(format!(
+                        "A carryover entry for {} already exists. Press Add again to overwrite.",
+                        validated.year
+                    ));
+                    return Task::none();
+                }
+                self.settings_form.carryover_overwrite_confirm = None;
                 self.settings.carryover.insert(validated.year, crate::state::settings::YearCarryover {
-                    holiday_days: if epd > 0.0 { validated.holiday_hours / epd } else { 0.0 },
+                    holiday_hours: validated.holiday_hours,
                     overtime_hours: validated.overtime_hours,
+                    legacy_holiday_days: 0.0,
                 });
                 match self.settings.save() {
                     Ok(()) => {
@@ -351,15 +370,24 @@ impl EasyHarvest {
                         self.settings_form.carryover_holiday_input.clear();
                         self.settings_form.carryover_overtime_input.clear();
                         self.settings_form.carryover_error = None;
+                        self.recompute_vacation_summary();
                     }
                     Err(e) => self.settings_form.carryover_error = Some(format!("Save failed: {e}")),
                 }
                 Task::none()
             }
 
+            SettingsMsg::CarryoverConfirmOverwrite => {
+                // Alias: re-dispatch CarryoverSave with the confirm flag already set.
+                // The confirm flag was already set by the first CarryoverSave attempt,
+                // so this message is only here for potential future explicit confirm buttons.
+                Task::done(Message::Settings(SettingsMsg::CarryoverSave))
+            }
+
             SettingsMsg::CarryoverDelete(year) => {
                 self.settings.carryover.remove(&year);
                 self.save_settings_or_warn();
+                self.recompute_vacation_summary();
                 Task::none()
             }
 
@@ -380,6 +408,7 @@ impl EasyHarvest {
                         self.settings_form.profile_saved = true;
                         self.settings_form.profile_error = None;
                         self.recompute_expected_hours();
+                        self.recompute_vacation_summary();
                     }
                     Err(e) => {
                         self.settings_form.profile_error = Some(format!("Save failed: {e}"));
@@ -540,11 +569,10 @@ impl EasyHarvest {
                     self.error_banner = Some(format!("Failed to save bootstrap config: {e}"));
                 }
                 // Copy token to new location.
-                if let Some(token) = Settings::load_token(&self.settings.data_dir) {
-                    if let Err(e) = Settings::save_token(&token, &new_dir) {
+                if let Some(token) = Settings::load_token(&self.settings.data_dir)
+                    && let Err(e) = Settings::save_token(&token, &new_dir) {
                         self.error_banner = Some(format!("Failed to copy token: {e}"));
                     }
-                }
                 // Copy all other data files so the folder change is non-destructive.
                 let old_dir = self.settings.data_dir.clone();
                 let migrate_errors = migrate_data_files(&old_dir, &new_dir);
@@ -625,6 +653,12 @@ fn migrate_data_files(
 ) -> Vec<String> {
     let mut errors: Vec<String> = Vec::new();
 
+    // Ensure the destination exists before attempting any copies.
+    if let Err(e) = std::fs::create_dir_all(new_dir) {
+        errors.push(format!("create destination directory: {e}"));
+        return errors;
+    }
+
     let files = [
         "favorites.json",
         "templates.json",
@@ -633,11 +667,10 @@ fn migrate_data_files(
     ];
     for name in &files {
         let src = old_dir.join(name);
-        if src.exists() {
-            if let Err(e) = std::fs::copy(&src, new_dir.join(name)) {
+        if src.exists()
+            && let Err(e) = std::fs::copy(&src, new_dir.join(name)) {
                 errors.push(format!("{name}: {e}"));
             }
-        }
     }
 
     // Copy the work_days/ directory recursively.
@@ -649,13 +682,11 @@ fn migrate_data_files(
         } else if let Ok(entries) = std::fs::read_dir(&src_wd) {
             for entry in entries.flatten() {
                 let src_file = entry.path();
-                if src_file.is_file() {
-                    if let Some(name) = src_file.file_name() {
-                        if let Err(e) = std::fs::copy(&src_file, dst_wd.join(name)) {
-                            errors.push(format!("work_days/{}: {e}", name.to_string_lossy()));
-                        }
+                if src_file.is_file()
+                    && let Some(name) = src_file.file_name()
+                    && let Err(e) = std::fs::copy(&src_file, dst_wd.join(name)) {
+                        errors.push(format!("work_days/{}: {e}", name.to_string_lossy()));
                     }
-                }
             }
         }
     }
@@ -665,18 +696,16 @@ fn migrate_data_files(
     let src_cache = old_dir.join("cache");
     if src_cache.is_dir() {
         let dst_cache = new_dir.join("cache");
-        if std::fs::create_dir_all(&dst_cache).is_ok() {
-            if let Ok(entries) = std::fs::read_dir(&src_cache) {
+        if std::fs::create_dir_all(&dst_cache).is_ok()
+            && let Ok(entries) = std::fs::read_dir(&src_cache) {
                 for entry in entries.flatten() {
                     let src_file = entry.path();
-                    if src_file.is_file() {
-                        if let Some(name) = src_file.file_name() {
+                    if src_file.is_file()
+                        && let Some(name) = src_file.file_name() {
                             let _ = std::fs::copy(&src_file, dst_cache.join(name));
                         }
-                    }
                 }
             }
-        }
     }
 
     errors

@@ -893,4 +893,64 @@ mod tests {
         assert_eq!(mar.expected_hours, 0.0);
     }
 
+    // --- year_to_date_balance: part-time and combined scenarios ---
+
+    #[test]
+    fn test_year_to_date_part_time_epd() {
+        // 80% at 41h/week → epd = 6.56h/day.
+        // One full week (Mon-Fri, Jan 6-10 2025) of 6.56h each = 32.8h booked.
+        // as_of = Jan 10 → 8 working days × 6.56h = 52.48h expected.
+        let epd = (41.0_f64 * 0.8) / 5.0; // 6.56
+        let entries = vec![
+            entry("2025-01-06", epd, 1, false),
+            entry("2025-01-07", epd, 1, false),
+            entry("2025-01-08", epd, 1, false),
+            entry("2025-01-09", epd, 1, false),
+            entry("2025-01-10", epd, 1, false),
+        ];
+        let as_of = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
+        let ytd = year_to_date_balance(&entries, 2025, None, epd, &[], 0.0, 0.0, as_of);
+
+        assert!((ytd.period.total_hours - 5.0 * epd).abs() < 1e-9);
+        assert!((ytd.period.expected_hours - 8.0 * epd).abs() < 1e-9);
+        // balance = 5 days worked − 8 days expected = −3 days × epd
+        assert!((ytd.period.balance_hours - (-3.0 * epd)).abs() < 1e-9);
+        assert_eq!(ytd.total_balance, ytd.period.balance_hours);
+    }
+
+    #[test]
+    fn test_year_to_date_full_scenario_carryover_payout_part_time() {
+        // Reproduces the colleague's scenario:
+        //   • Full-time (8.2h/day)
+        //   • Overtime carryover +20h from previous year
+        //   • One hours payout of −16h booked as a negative manual adjustment
+        //   • One positive correction of +4h
+        //   • One regular week of entries (5 × 8.2h)
+        //
+        // Expected total = 20 + (41 − 41) + (−16 + 4) = 20 + 0 + (−12) = 8h
+        let epd = 8.2_f64;
+        let entries = vec![
+            entry("2025-01-06", epd, 1, false),
+            entry("2025-01-07", epd, 1, false),
+            entry("2025-01-08", epd, 1, false),
+            entry("2025-01-09", epd, 1, false),
+            entry("2025-01-10", epd, 1, false),
+        ];
+        // Jan 1 (Wed) – Jan 3 (Fri) + Jan 6 – Jan 10 = 8 working days expected.
+        // 5 days booked → period balance = (5 − 8) × 8.2 = −24.6h.
+        let as_of = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
+        let carryover = 20.0_f64;
+        let adj_total = -16.0 + 4.0; // payout − correction = −12h net
+        let ytd = year_to_date_balance(&entries, 2025, None, epd, &[], carryover, adj_total, as_of);
+
+        assert_eq!(ytd.carryover_hours, 20.0);
+        assert_eq!(ytd.manual_adjustments_hours, -12.0);
+        let expected_total = 20.0 + ytd.period.balance_hours + (-12.0);
+        assert!((ytd.total_balance - expected_total).abs() < 1e-9);
+        // Sanity: period balance = 5×8.2 − 8×8.2 = −24.6
+        assert!((ytd.period.balance_hours - (-3.0 * epd)).abs() < 1e-9);
+        // total = 20 − 24.6 − 12 = −16.6
+        assert!((ytd.total_balance - (20.0 - 3.0 * epd - 12.0)).abs() < 1e-9);
+    }
+
 }

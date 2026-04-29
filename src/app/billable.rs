@@ -95,8 +95,8 @@ impl EasyHarvest {
                 }
             }
 
-            BillableMsg::EntriesLoaded(gen, result) => {
-                if gen != self.billable_gen { return Task::none(); }
+            BillableMsg::EntriesLoaded(r#gen, result) => {
+                if r#gen != self.billable_gen { return Task::none(); }
                 self.loading = false;
                 match result {
                     Ok(entries) => {

@@ -141,8 +141,8 @@ impl EasyHarvest {
                 }
             }
 
-            ProjectTrackingMsg::EntriesLoaded(gen, result) => {
-                if gen != self.project_tracking_gen { return Task::none(); }
+            ProjectTrackingMsg::EntriesLoaded(r#gen, result) => {
+                if r#gen != self.project_tracking_gen { return Task::none(); }
                 self.loading = false;
                 match result {
                     Ok(entries) => {
@@ -187,9 +187,19 @@ impl EasyHarvest {
 
             ProjectTrackingMsg::DeleteBudget(id) => {
                 let year = self.project_tracking.year;
+                // Stash the item before removing so we can roll back on save failure.
+                let removed: Vec<_> = self.project_tracking.budgets
+                    .budgets_for(year)
+                    .iter()
+                    .filter(|b| b.id == id)
+                    .cloned()
+                    .collect();
                 self.project_tracking.budgets.budgets_for_mut(year).retain(|b| b.id != id);
                 if let Err(e) = self.project_tracking.budgets.save(&self.settings.data_dir) {
+                    // Roll back so displayed data matches disk.
+                    self.project_tracking.budgets.budgets_for_mut(year).extend(removed);
                     self.error_banner = Some(format!("Failed to save budgets: {e}"));
+                    return Task::none();
                 }
                 self.recompute_project_tracking_summaries();
                 Task::none()

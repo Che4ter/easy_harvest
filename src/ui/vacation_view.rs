@@ -135,16 +135,15 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
             {
                 let carryover_str = if carryover_days != 0.0 {
                     format!(
-                        "  ·  {}{:.1}d carryover ({:.1}h)",
+                        " (incl. {}{:.1}d carryover)",
                         if carryover_days > 0.0 { "+" } else { "" },
                         carryover_days,
-                        carryover_days * expected_per_day
                     )
                 } else {
                     String::new()
                 };
                 caption(format!(
-                    "{:.1} days total entitlement  ({:.1}h){carryover_str}",
+                    "{:.1} days total entitlement{carryover_str}  ({:.1}h)",
                     total_days,
                     total_days * expected_per_day
                 ))

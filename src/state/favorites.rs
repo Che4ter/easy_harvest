@@ -332,4 +332,58 @@ mod tests {
         let fav = Favorites::load(dir.path());
         assert!(fav.entries.is_empty());
     }
+
+    #[test]
+    fn test_inactive_task_assignment_excluded() {
+        // Project is active, but one of its task assignments is inactive.
+        // Only the active task should appear in sorted_options.
+        let mut assignments = make_assignments();
+        assignments[0].task_assignments[1].is_active = false; // deactivate "Frontend"
+
+        let fav = Favorites::default();
+        let opts = fav.sorted_options(&assignments);
+        assert!(
+            opts.iter().all(|o| o.task_name != "Frontend"),
+            "inactive task assignment must be excluded"
+        );
+        assert!(opts.iter().any(|o| o.task_name == "Backend"), "active task must still appear");
+    }
+
+    #[test]
+    fn test_matches_query_multi_token_all_must_match() {
+        let opt = ProjectOption {
+            project_id: 10,
+            task_id: 200,
+            client_name: "Acme".into(),
+            project_name: "Website".into(),
+            task_name: "Backend".into(),
+            is_pinned: false,
+            use_count: 0,
+            search_text: "Acme > Website — Backend".into(),
+        };
+        // Both tokens present → match.
+        assert!(opt.matches_query("acme backend"));
+        // Only one of two tokens present → no match.
+        assert!(!opt.matches_query("acme xyz"));
+        // Three tokens, all present → match.
+        assert!(opt.matches_query("acme website backend"));
+    }
+
+    #[test]
+    fn test_matches_query_partial_substring() {
+        let opt = ProjectOption {
+            project_id: 10,
+            task_id: 200,
+            client_name: "Acme".into(),
+            project_name: "Website".into(),
+            task_name: "Backend".into(),
+            is_pinned: false,
+            use_count: 0,
+            search_text: "Acme > Website — Backend".into(),
+        };
+        // Partial / substring match is supported.
+        assert!(opt.matches_query("acm"));
+        assert!(opt.matches_query("ack")); // "Backend" contains "ack"
+        assert!(!opt.matches_query("acmez")); // no match when substring not present
+    }
 }

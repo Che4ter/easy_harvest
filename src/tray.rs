@@ -168,11 +168,10 @@ fn spawn_tray_thread(
             loop {
                 // Check for menu clicks (non-blocking).
                 while let Ok(event) = menu_rx.try_recv() {
-                    if let Some(action) = map_menu_event(&event.id, &ids) {
-                        if action_tx.send(action).is_err() {
+                    if let Some(action) = map_menu_event(&event.id, &ids)
+                        && action_tx.send(action).is_err() {
                             return; // subscription dropped
                         }
-                    }
                 }
 
                 // Check for tray icon clicks — left-click toggles the window.

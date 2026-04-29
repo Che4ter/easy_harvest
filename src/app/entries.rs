@@ -89,8 +89,8 @@ pub enum EntryMsg {
 impl EasyHarvest {
     pub(super) fn update_entries(&mut self, msg: EntryMsg) -> Task<Message> {
         match msg {
-            EntryMsg::Loaded(gen, result) => {
-                if gen != self.entries_gen { return Task::none(); }
+            EntryMsg::Loaded(r#gen, result) => {
+                if r#gen != self.entries_gen { return Task::none(); }
                 self.loading = false;
                 self.pending_delete = None;
                 match result {

@@ -11,9 +11,15 @@ use serde::{Deserialize, Serialize};
 /// Carryover values for a specific year (carried *into* that year).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct YearCarryover {
-    /// Vacation days carried into this year (absolute, already adjusted for %).
+    /// Vacation hours carried into this year.
+    /// Converted to days using `expected_hours_per_day()` at calculation time
+    /// so the value stays correct regardless of work-percentage changes.
     #[serde(default)]
-    pub holiday_days: f64,
+    pub holiday_hours: f64,
+    /// Legacy field — persisted as days before the rename to `holiday_hours`.
+    /// Kept read-only for backward-compatible migration; never written by new code.
+    #[serde(default, rename = "holiday_days", skip_serializing)]
+    pub legacy_holiday_days: f64,
     /// Overtime hours carried into this year (positive = banked, negative = deficit).
     #[serde(default)]
     pub overtime_hours: f64,
@@ -190,7 +196,20 @@ impl Settings {
         } else {
             self.total_holiday_days_per_year as f64
         };
-        base + self.carryover.get(&year).map(|c| c.holiday_days).unwrap_or(0.0)
+        let epd = self.expected_hours_per_day();
+        base + self.carryover.get(&year).map(|c| {
+            // Migration: data written before the holiday_days→holiday_hours rename stored
+            // the value as days rather than hours.  Detect this by checking whether the
+            // modern field is zero while the legacy field is non-zero, and use the legacy
+            // days value directly (no EPD conversion needed — it was already in days).
+            if c.holiday_hours == 0.0 && c.legacy_holiday_days > 0.0 {
+                c.legacy_holiday_days
+            } else if epd > 0.0 {
+                c.holiday_hours / epd
+            } else {
+                0.0
+            }
+        }).unwrap_or(0.0)
     }
 
     /// Overtime carryover hours for the given year (0.0 if not set).
@@ -360,14 +379,15 @@ mod tests {
     #[test]
     fn test_effective_holiday_days_with_carryover() {
         let mut carryover = std::collections::HashMap::new();
-        carryover.insert(2026, YearCarryover { holiday_days: 3.5, overtime_hours: 0.0 });
+        // 3.5 days at 80% (6.56 h/day) = 22.96 h
+        carryover.insert(2026, YearCarryover { holiday_hours: 22.96, overtime_hours: 0.0, legacy_holiday_days: 0.0 });
         let s = Settings {
             total_holiday_days_per_year: 25,
             work_percentage: 0.8,
             carryover,
             ..Default::default()
         };
-        assert_eq!(s.effective_holiday_days_for(2026), 28.5);
+        assert!((s.effective_holiday_days_for(2026) - 28.5).abs() < 1e-9);
     }
 
     #[test]
@@ -636,7 +656,8 @@ mod tests {
     fn test_save_load_roundtrip() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut carryover = std::collections::HashMap::new();
-        carryover.insert(2026, YearCarryover { holiday_days: 2.0, overtime_hours: 5.5 });
+        // 2 days at 80% (6.56 h/day) = 13.12 h
+        carryover.insert(2026, YearCarryover { holiday_hours: 13.12, overtime_hours: 5.5, legacy_holiday_days: 0.0 });
         let settings = Settings {
             account_id: "12345".into(),
             data_dir: dir.path().to_path_buf(),
@@ -651,7 +672,7 @@ mod tests {
         assert_eq!(loaded.account_id, "12345");
         assert_eq!(loaded.work_percentage, 0.8);
         assert_eq!(loaded.overtime_carryover_for(2026), 5.5);
-        assert_eq!(loaded.effective_holiday_days_for(2026), 25.0 + 2.0);
+        assert!((loaded.effective_holiday_days_for(2026) - 27.0).abs() < 1e-9);
         assert_eq!(loaded.data_dir, dir.path());
     }
 
@@ -672,5 +693,133 @@ mod tests {
         assert_eq!(loaded.total_weekly_hours, 41.0);
         assert_eq!(loaded.work_percentage, 1.0);
         assert!(loaded.carryover.is_empty());
+    }
+
+    #[test]
+    fn test_carryover_cross_year_isolation() {
+        // Carryover stored for 2025 must NOT appear when querying 2026.
+        let mut carryover = std::collections::HashMap::new();
+        // 5 days at 100% (8.2 h/day) = 41.0 h
+        carryover.insert(2025, YearCarryover { holiday_hours: 41.0, overtime_hours: 10.0, legacy_holiday_days: 0.0 });
+        let s = Settings {
+            total_holiday_days_per_year: 25,
+            carryover,
+            ..Default::default()
+        };
+        assert_eq!(s.effective_holiday_days_for(2026), 25.0);
+        assert_eq!(s.overtime_carryover_for(2026), 0.0);
+        // The 2025 entry is still intact.
+        assert!((s.effective_holiday_days_for(2025) - 30.0).abs() < 1e-9);
+        assert_eq!(s.overtime_carryover_for(2025), 10.0);
+    }
+
+    #[test]
+    fn test_carryover_multiple_years_independent() {
+        // Two carryover entries — each year returns only its own values.
+        let mut carryover = std::collections::HashMap::new();
+        // 2 days at 100% (8.2 h/day) = 16.4 h; 3.5 days = 28.7 h
+        carryover.insert(2025, YearCarryover { holiday_hours: 16.4, overtime_hours: 8.0, legacy_holiday_days: 0.0 });
+        carryover.insert(2026, YearCarryover { holiday_hours: 28.7, overtime_hours: -4.0, legacy_holiday_days: 0.0 });
+        let s = Settings {
+            total_holiday_days_per_year: 25,
+            carryover,
+            ..Default::default()
+        };
+        assert!((s.effective_holiday_days_for(2025) - 27.0).abs() < 1e-9);
+        assert_eq!(s.overtime_carryover_for(2025), 8.0);
+        assert!((s.effective_holiday_days_for(2026) - 28.5).abs() < 1e-9);
+        assert_eq!(s.overtime_carryover_for(2026), -4.0);
+    }
+
+    #[test]
+    fn test_carryover_overwrite_replaces_existing_year() {
+        // Inserting a new entry for the same year must replace the old one.
+        let mut carryover = std::collections::HashMap::new();
+        // 5 days at 100% (8.2 h/day) = 41.0 h
+        carryover.insert(2026, YearCarryover { holiday_hours: 41.0, overtime_hours: 20.0, legacy_holiday_days: 0.0 });
+        let mut s = Settings {
+            total_holiday_days_per_year: 25,
+            carryover,
+            ..Default::default()
+        };
+        // Overwrite with corrected values: 3 days = 24.6 h
+        s.carryover.insert(2026, YearCarryover { holiday_hours: 24.6, overtime_hours: 12.0, legacy_holiday_days: 0.0 });
+        assert!((s.effective_holiday_days_for(2026) - 28.0).abs() < 1e-9);
+        assert_eq!(s.overtime_carryover_for(2026), 12.0);
+        assert_eq!(s.carryover.len(), 1);
+    }
+
+    #[test]
+    fn test_effective_holiday_days_proration_plus_carryover() {
+        // First-year proration should be computed from the base only;
+        // carryover is added on top, independent of proration.
+        // Start date: Jul 1, 2025. days_worked = 184 (Jul 1 → Dec 31 inclusive).
+        // days_in_year = 365. base ≈ 25 * 184/365 ≈ 12.603.
+        let fwd = NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
+        let year_end = NaiveDate::from_ymd_opt(2025, 12, 31).unwrap();
+        let year_start = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+        let days_in_year = year_end.signed_duration_since(year_start).num_days() + 1;
+        let days_worked = year_end.signed_duration_since(fwd).num_days() + 1;
+        let expected_base = 25.0 * days_worked as f64 / days_in_year as f64;
+
+        let mut carryover = std::collections::HashMap::new();
+        // 2 days at 100% (8.2 h/day) = 16.4 h
+        carryover.insert(2025, YearCarryover { holiday_hours: 16.4, overtime_hours: 0.0, legacy_holiday_days: 0.0 });
+        let s = Settings {
+            total_holiday_days_per_year: 25,
+            first_work_day: Some(fwd),
+            carryover,
+            ..Default::default()
+        };
+        let expected_total = expected_base + 2.0;
+        assert!((s.effective_holiday_days_for(2025) - expected_total).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_legacy_holiday_days_migration() {
+        // Simulate loading an old JSON payload that has "holiday_days" (days, not hours).
+        // After the rename the field maps to legacy_holiday_days; the effective calculation
+        // must use it directly as a days value without any EPD conversion.
+        let json = r#"{
+            "2025": { "holiday_days": 2.5, "overtime_hours": 4.0 }
+        }"#;
+        let carryover: std::collections::HashMap<i32, YearCarryover> =
+            serde_json::from_str(json).unwrap();
+
+        let s = Settings {
+            carryover,
+            total_weekly_hours: 41.0,
+            work_percentage: 0.8,
+            total_holiday_days_per_year: 25,
+            ..Default::default()
+        };
+
+        // Legacy value should be used as-is in days; no EPD division.
+        // 25 base + 2.5 legacy days = 27.5
+        assert!((s.effective_holiday_days_for(2025) - 27.5).abs() < 1e-9);
+        // Overtime carryover must still work normally.
+        assert!((s.overtime_carryover_for(2025) - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_modern_holiday_hours_not_treated_as_legacy() {
+        // When holiday_hours is set, it must be divided by EPD — not treated as days.
+        let epd = 41.0 * 0.8 / 5.0; // 6.56h/day
+        let holiday_hours = 2.0 * epd; // 2 days worth of hours
+
+        let json = format!(r#"{{"2025": {{"holiday_hours": {holiday_hours}, "overtime_hours": 0.0}}}}"#);
+        let carryover: std::collections::HashMap<i32, YearCarryover> =
+            serde_json::from_str(&json).unwrap();
+
+        let s = Settings {
+            carryover,
+            total_weekly_hours: 41.0,
+            work_percentage: 0.8,
+            total_holiday_days_per_year: 25,
+            ..Default::default()
+        };
+
+        // 25 + 2.0 days (converted from hours)
+        assert!((s.effective_holiday_days_for(2025) - 27.0).abs() < 1e-9);
     }
 }

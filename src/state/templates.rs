@@ -34,3 +34,70 @@ impl Templates {
         super::io::atomic_write(&data_dir.join("templates.json"), &json)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_returns_empty_for_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = Templates::load(dir.path());
+        assert!(t.entries.is_empty());
+    }
+
+    #[test]
+    fn save_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut t = Templates::default();
+        t.entries.push(EntryTemplate {
+            label: "Travel Luzern-Olten".into(),
+            project_id: 42,
+            task_id: 7,
+            hours: "1:30".into(),
+            notes: "Return ticket".into(),
+        });
+        t.entries.push(EntryTemplate {
+            label: "Weekly sync".into(),
+            project_id: 10,
+            task_id: 3,
+            hours: String::new(),
+            notes: String::new(),
+        });
+        t.save(dir.path()).unwrap();
+
+        let loaded = Templates::load(dir.path());
+        assert_eq!(loaded.entries.len(), 2);
+        assert_eq!(loaded.entries[0].label, "Travel Luzern-Olten");
+        assert_eq!(loaded.entries[0].project_id, 42);
+        assert_eq!(loaded.entries[0].hours, "1:30");
+        assert_eq!(loaded.entries[1].label, "Weekly sync");
+        assert!(loaded.entries[1].notes.is_empty());
+    }
+
+    #[test]
+    fn save_overwrites_previous_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut t = Templates::default();
+        t.entries.push(EntryTemplate {
+            label: "Old".into(), project_id: 1, task_id: 1,
+            hours: String::new(), notes: String::new(),
+        });
+        t.save(dir.path()).unwrap();
+
+        let mut t2 = Templates::default();
+        t2.entries.push(EntryTemplate {
+            label: "New".into(), project_id: 2, task_id: 2,
+            hours: String::new(), notes: String::new(),
+        });
+        t2.save(dir.path()).unwrap();
+
+        let loaded = Templates::load(dir.path());
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(loaded.entries[0].label, "New");
+    }
+}

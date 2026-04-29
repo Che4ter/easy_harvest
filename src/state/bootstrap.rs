@@ -8,14 +8,13 @@ use serde::{Deserialize, Serialize};
 /// automatically synced without any extra setup.  On every other
 /// platform we fall back to the OS data directory.
 pub fn default_data_dir() -> PathBuf {
-    if cfg!(target_os = "windows") {
-        if let Some(home) = dirs::home_dir() {
+    if cfg!(target_os = "windows")
+        && let Some(home) = dirs::home_dir() {
             let onedrive = home.join("OneDrive").join("EasyHarvest");
             if onedrive.parent().is_some_and(|p| p.exists()) {
                 return onedrive;
             }
         }
-    }
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("easy_harvest")

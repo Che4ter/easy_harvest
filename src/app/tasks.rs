@@ -27,7 +27,7 @@ impl EasyHarvest {
             return Task::none();
         };
         let date = self.current_date.format("%Y-%m-%d").to_string();
-        let gen = self.entries_gen;
+        let r#gen = self.entries_gen;
         let user_id = self.harvest_user_id;
         Task::perform(
             async move {
@@ -36,7 +36,7 @@ impl EasyHarvest {
                     .await
                     .map_err(|e| e.to_string())
             },
-            move |result| Message::Entry(Box::new(EntryMsg::Loaded(gen, result))),
+            move |result| Message::Entry(Box::new(EntryMsg::Loaded(r#gen, result))),
         )
     }
 
@@ -48,11 +48,10 @@ impl EasyHarvest {
         Task::perform(
             async move {
                 // Try cache first (24-hour TTL)
-                if let Some(cache) = ProjectCache::load(&data_dir) {
-                    if cache.is_valid() {
+                if let Some(cache) = ProjectCache::load(&data_dir)
+                    && cache.is_valid() {
                         return Ok(cache.assignments);
                     }
-                }
                 let assignments = client
                     .list_all_my_project_assignments()
                     .await
@@ -87,7 +86,7 @@ impl EasyHarvest {
         let total_holiday_days = self.settings.effective_holiday_days_for(year);
         let first_work_day = self.settings.first_work_day;
         let adj_total = self.overtime_adjustments.adjustments_total(year);
-        let gen = self.stats_gen;
+        let r#gen = self.stats_gen;
         let user_id = self.harvest_user_id;
 
         Task::perform(
@@ -135,7 +134,7 @@ impl EasyHarvest {
                 );
                 Ok((balance, holidays, months))
             },
-            move |result| Message::Stats(StatsMsg::Loaded(gen, result)),
+            move |result| Message::Stats(StatsMsg::Loaded(r#gen, result)),
         )
     }
 
@@ -146,7 +145,7 @@ impl EasyHarvest {
         let year = self.vacation.year;
         let from = format!("{year}-01-01");
         let to = format!("{year}-12-31");
-        let gen = self.vacation_gen;
+        let r#gen = self.vacation_gen;
         let user_id = self.harvest_user_id;
         Task::perform(
             async move {
@@ -155,7 +154,7 @@ impl EasyHarvest {
                     .await
                     .map_err(|e| e.to_string())
             },
-            move |result| Message::Vacation(VacationMsg::EntriesLoaded(gen, result)),
+            move |result| Message::Vacation(VacationMsg::EntriesLoaded(r#gen, result)),
         )
     }
 
@@ -181,7 +180,7 @@ impl EasyHarvest {
                 (first.format("%Y-%m-%d").to_string(), last.format("%Y-%m-%d").to_string())
             }
         };
-        let gen = self.billable_gen;
+        let r#gen = self.billable_gen;
         let user_id = self.harvest_user_id;
         Task::perform(
             async move {
@@ -190,7 +189,7 @@ impl EasyHarvest {
                     .await
                     .map_err(|e| e.to_string())
             },
-            move |result| Message::Billable(BillableMsg::EntriesLoaded(gen, result)),
+            move |result| Message::Billable(BillableMsg::EntriesLoaded(r#gen, result)),
         )
     }
 
@@ -288,7 +287,10 @@ impl EasyHarvest {
             .settings
             .carryover
             .get(&year)
-            .map(|c| c.holiday_days)
+            .map(|c| {
+                let epd = self.settings.expected_hours_per_day();
+                if epd > 0.0 { c.holiday_hours / epd } else { 0.0 }
+            })
             .unwrap_or(0.0);
 
         self.vacation.summary = Some(VacationSummary {
@@ -341,7 +343,7 @@ impl EasyHarvest {
             return Task::none();
         };
         let year = self.project_tracking.year;
-        let gen = self.project_tracking_gen;
+        let r#gen = self.project_tracking_gen;
 
         let from = format!("{year}-01-01");
         let today = Local::now().naive_local().date();
@@ -373,7 +375,7 @@ impl EasyHarvest {
                     .collect();
                 Ok(filtered)
             },
-            move |result| Message::ProjectTracking(ProjectTrackingMsg::EntriesLoaded(gen, result)),
+            move |result| Message::ProjectTracking(ProjectTrackingMsg::EntriesLoaded(r#gen, result)),
         )
     }
 
