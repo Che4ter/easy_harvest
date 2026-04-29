@@ -58,7 +58,6 @@ identifier = "com.easyharvest"
 icon = [
     "target/icons/icon_16.png",
     "target/icons/icon_32.png",
-    "target/icons/icon_64.png",
     "target/icons/icon_128.png",
     "target/icons/icon_256.png",
     "target/icons/icon_512.png",

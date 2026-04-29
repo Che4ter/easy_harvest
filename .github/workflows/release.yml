@@ -102,5 +102,6 @@ jobs:
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: ${{ matrix.asset }}
-          # Auto-generate release notes from commits since the last tag.
-          generate_release_notes: true
+          # Only the Linux job generates release notes; the other two jobs just
+          # upload their assets to the same release without overwriting the body.
+          generate_release_notes: ${{ matrix.name == 'Linux x86_64' }}
