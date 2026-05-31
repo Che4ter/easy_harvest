@@ -23,6 +23,10 @@ impl EasyHarvest {
             col = col.push(error_banner(err));
         }
 
+        if let Some(version) = &self.update_available {
+            col = col.push(update_banner(version));
+        }
+
         col = col.push(content);
 
         container(col)
@@ -126,6 +130,44 @@ fn error_banner(msg: &str) -> Element<'_, Message> {
         ..Default::default()
     })
     .padding([8, 16])
+    .width(iced::Length::Fill)
+    .into()
+}
+
+fn update_banner(version: &str) -> Element<'_, Message> {
+    let link = button(
+        text("View release →")
+            .font(FONT_MEDIUM)
+            .size(13)
+            .color(Color::WHITE),
+    )
+    .style(|_, _| button::Style {
+        background: Some(iced::Background::Color(Color {
+            r: 0.0, g: 0.0, b: 0.0, a: 0.20,
+        })),
+        text_color: Color::WHITE,
+        border: iced::Border { radius: 4.0.into(), ..Default::default() },
+        ..Default::default()
+    })
+    .padding([4, 10])
+    .on_press(Message::OpenReleases);
+
+    container(
+        row![
+            text(format!("Update available: {version}"))
+                .font(FONT_REGULAR)
+                .size(13)
+                .color(Color::WHITE),
+            Space::new().width(iced::Length::Fill),
+            link,
+        ]
+        .align_y(iced::Alignment::Center),
+    )
+    .style(|_| container::Style {
+        background: Some(iced::Background::Color(ACCENT)),
+        ..Default::default()
+    })
+    .padding([6, 16])
     .width(iced::Length::Fill)
     .into()
 }

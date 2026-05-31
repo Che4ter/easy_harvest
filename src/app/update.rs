@@ -142,6 +142,17 @@ impl EasyHarvest {
                     iced::exit()
                 }
             }
+
+            Message::UpdateCheckResult(tag) => {
+                self.update_available = tag;
+                Task::none()
+            }
+
+            Message::OpenReleases => {
+                let url = format!("{}/releases", env!("CARGO_PKG_REPOSITORY"));
+                let _ = open::that_detached(url);
+                Task::none()
+            }
         }
     }
 

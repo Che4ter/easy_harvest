@@ -2,7 +2,84 @@ use super::*;
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
+/// Parse a strict `vMAJOR.MINOR.PATCH` semver tag.
+/// Returns `None` for anything with pre-release suffixes (e.g. `v1.6.0-beta.1`)
+/// so that pre-release tags never trigger the update banner.
+fn parse_semver(v: &str) -> Option<(u32, u32, u32)> {
+    let v = v.trim_start_matches('v');
+    // Reject anything with a pre-release or build-metadata suffix.
+    if v.contains('-') || v.contains('+') {
+        return None;
+    }
+    let mut parts = v.splitn(3, '.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    let patch: u32 = parts.next()?.parse().ok()?; // patch is required
+    Some((major, minor, patch))
+}
+
 impl EasyHarvest {
+    /// Check GitHub releases for a newer version. Fires once on startup and
+    /// resolves to `Some(tag)` when a newer stable release is available, or
+    /// `None` otherwise. Silently swallows all network/parse errors.
+    pub(super) fn check_for_update_task() -> Task<Message> {
+        // Derived from `repository` in Cargo.toml via CARGO_PKG_REPOSITORY.
+        const REPO: &str = env!("CARGO_PKG_REPOSITORY");
+
+        Task::perform(
+            async move {
+                // Turn "https://github.com/owner/repo" or
+                // "https://github.com/owner/repo.git" → "owner/repo"
+                let slug = REPO
+                    .trim_start_matches("https://github.com/")
+                    .trim_end_matches('/')
+                    .trim_end_matches(".git");
+                if slug.is_empty() || !slug.contains('/') || slug.starts_with('/') {
+                    return None;
+                }
+                let url = format!(
+                    "https://api.github.com/repos/{slug}/releases/latest"
+                );
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(10))
+                    .build()
+                    .ok()?;
+                let resp = client
+                    .get(&url)
+                    .header(
+                        "User-Agent",
+                        concat!("easy-harvest/", env!("CARGO_PKG_VERSION")),
+                    )
+                    .header("Accept", "application/vnd.github+json")
+                    .send()
+                    .await
+                    .ok()?;
+
+                if !resp.status().is_success() {
+                    return None;
+                }
+
+                let json: serde_json::Value = resp.json().await.ok()?;
+
+                // Skip drafts and pre-releases (belt-and-suspenders on top of
+                // what the /releases/latest endpoint already enforces).
+                if json.get("draft").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    return None;
+                }
+                if json.get("prerelease").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    return None;
+                }
+
+                let tag = json.get("tag_name")?.as_str()?;
+                let current = parse_semver(env!("CARGO_PKG_VERSION"))?;
+                let latest = parse_semver(tag)?;
+
+                if latest > current { Some(tag.to_owned()) } else { None }
+            },
+            Message::UpdateCheckResult,
+        )
+    }
+
     /// Fetch the current user's Harvest ID and store it in `harvest_user_id`.
     /// This must be resolved before any time-entry listing task so that
     /// manager-role accounts do not receive other users' entries.

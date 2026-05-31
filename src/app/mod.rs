@@ -215,6 +215,11 @@ pub enum Message {
     // Current user — fetched on startup so we can filter time-entry requests
     CurrentUserLoaded(Result<i64, String>),
 
+    // Update check — Some(tag) when a newer release is available
+    UpdateCheckResult(Option<String>),
+    // Open the GitHub releases page in the default browser
+    OpenReleases,
+
     // Focus
     TabPressed { shift: bool },
 }
@@ -261,6 +266,7 @@ pub struct EasyHarvest {
     pub window_id: Option<window::Id>,
     pub tray_available: bool,
     pub window_visible: bool,
+    pub update_available: Option<String>,
 
     /// 0 = data-folder step, 1 = credentials step (first-run wizard only).
     pub wizard_step: u8,
@@ -429,6 +435,7 @@ impl EasyHarvest {
             billable: BillablePageState::new(today.year()),
             project_tracking,
             window_id: None,
+            update_available: None,
             // Optimistically assume the tray works on Linux/Windows; set to false
             // only if the tray subscription reports a spawn failure.
             tray_available: cfg!(not(target_os = "macos")),
@@ -453,14 +460,19 @@ impl EasyHarvest {
         let (win_id, open_task) = window::open(window_settings());
         state.window_id = Some(win_id);
 
+        let update_task = EasyHarvest::check_for_update_task();
         let task = if initial_page == Page::Day {
             state.loading = true;
             Task::batch([
                 state.load_current_user_task(),
                 open_task.map(|id| Message::WindowIdReceived(Some(id))),
+                update_task,
             ])
         } else {
-            open_task.map(|id| Message::WindowIdReceived(Some(id)))
+            Task::batch([
+                open_task.map(|id| Message::WindowIdReceived(Some(id))),
+                update_task,
+            ])
         };
 
         #[cfg(debug_assertions)]
