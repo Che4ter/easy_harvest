@@ -112,7 +112,7 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            EntryMsg::SyncAssignments => self.load_assignments_task(),
+            EntryMsg::SyncAssignments => self.force_load_assignments_task(),
 
             EntryMsg::ShowForm => {
                 self.entry_form = Some(EntryForm::new());

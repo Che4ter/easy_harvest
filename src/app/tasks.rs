@@ -118,17 +118,27 @@ impl EasyHarvest {
     }
 
     pub(super) fn load_assignments_task(&self) -> Task<Message> {
+        self.load_assignments_task_inner(false)
+    }
+
+    pub(super) fn force_load_assignments_task(&self) -> Task<Message> {
+        self.load_assignments_task_inner(true)
+    }
+
+    fn load_assignments_task_inner(&self, force: bool) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();
         };
         let data_dir = self.settings.data_dir.clone();
         Task::perform(
             async move {
-                // Try cache first (24-hour TTL)
-                if let Some(cache) = ProjectCache::load(&data_dir)
-                    && cache.is_valid() {
-                        return Ok(cache.assignments);
-                    }
+                // Try cache first (24-hour TTL), unless the user explicitly requested a sync.
+                if !force {
+                    if let Some(cache) = ProjectCache::load(&data_dir)
+                        && cache.is_valid() {
+                            return Ok(cache.assignments);
+                        }
+                }
                 let assignments = client
                     .list_all_my_project_assignments()
                     .await

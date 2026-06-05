@@ -45,6 +45,8 @@ pub struct ProjectOption {
     pub use_count: u32,
     /// Pre-formatted for search: `"ClientName > ProjectName — TaskName"`.
     pub search_text: String,
+    /// Lowercase of `search_text`, pre-computed to avoid per-keystroke allocations.
+    pub search_text_lower: String,
 }
 
 impl ProjectOption {
@@ -59,8 +61,7 @@ impl ProjectOption {
         if query.trim().is_empty() {
             return true;
         }
-        let haystack = self.search_text.to_lowercase();
-        query.split_whitespace().all(|token| haystack.contains(token.to_lowercase().as_str()))
+        query.split_whitespace().all(|token| self.search_text_lower.contains(&*token.to_lowercase()))
     }
 }
 
@@ -125,6 +126,7 @@ impl Favorites {
                             "{} > {} — {}",
                             pa.client.name, pa.project.name, ta.task.name
                         );
+                        let search_text_lower = search_text.to_lowercase();
 
                         ProjectOption {
                             project_id: pa.project.id,
@@ -135,6 +137,7 @@ impl Favorites {
                             is_pinned: usage.is_some_and(|e| e.is_pinned),
                             use_count: usage.map_or(0, |e| e.use_count),
                             search_text,
+                            search_text_lower,
                         }
                     })
             })
@@ -291,6 +294,7 @@ mod tests {
             is_pinned: false,
             use_count: 0,
             search_text: "Acme > Website — Backend".into(),
+            search_text_lower: "acme > website — backend".into(),
         };
         assert!(opt.matches_query("acme"));
         assert!(opt.matches_query("BACKEND"));
@@ -360,6 +364,7 @@ mod tests {
             is_pinned: false,
             use_count: 0,
             search_text: "Acme > Website — Backend".into(),
+            search_text_lower: "acme > website — backend".into(),
         };
         // Both tokens present → match.
         assert!(opt.matches_query("acme backend"));
@@ -380,6 +385,7 @@ mod tests {
             is_pinned: false,
             use_count: 0,
             search_text: "Acme > Website — Backend".into(),
+            search_text_lower: "acme > website — backend".into(),
         };
         // Partial / substring match is supported.
         assert!(opt.matches_query("acm"));

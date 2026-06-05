@@ -758,14 +758,15 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
         }
     };
 
-    // Filtered suggestions
     let query = form.project_query.to_lowercase();
-    let suggestions: Vec<(usize, &ProjectOption)> = options
+    let mut suggestions: Vec<(usize, &ProjectOption)> = options
         .iter()
         .enumerate()
         .filter(|(_, o)| o.matches_query(&query))
-        .take(6)
         .collect();
+    // sort_by_cached_key computes the key once per element instead of on every comparison.
+    suggestions.sort_by(|(_, a), (_, b)| a.search_text_lower.cmp(&b.search_text_lower));
+    suggestions.truncate(25);
 
     let suggestion_list: Element<Message> = if !suggestions.is_empty()
         && form.selected_project_idx.is_none()
@@ -790,10 +791,16 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
             })
             .collect();
 
-        container(column(items).spacing(1))
-            .style(dropdown_container_style)
-            .width(Length::Fill)
-            .into()
+        container(
+            scrollable(column(items).spacing(1))
+                .direction(scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::new().width(4).scroller_width(4),
+                ))
+                .height(Length::Fixed(210.0)),
+        )
+        .style(dropdown_container_style)
+        .width(Length::Fill)
+        .into()
     } else {
         Space::new().into()
     };
