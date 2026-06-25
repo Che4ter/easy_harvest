@@ -161,6 +161,10 @@ impl EasyHarvest {
     fn update_navigation(&mut self, msg: NavMsg) -> Task<Message> {
         match msg {
             NavMsg::PageChanged(page) => {
+                // If the user navigates away while the profile wizard is open, dismiss it.
+                if page != Page::Settings && self.wizard_step == 2 {
+                    self.wizard_step = 1;
+                }
                 self.entry_form = None;
                 self.error_banner = None;
                 let task = match &page {

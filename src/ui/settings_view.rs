@@ -15,11 +15,11 @@ use super::{
 };
 
 pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
-    if state.client.is_none() {
-        return if state.wizard_step == 0 {
-            wizard_data_folder(state)
-        } else {
-            wizard_credentials(state)
+    if state.client.is_none() || state.wizard_step == 2 {
+        return match state.wizard_step {
+            0 => wizard_data_folder(state),
+            2 => wizard_profile(state),
+            _ => wizard_credentials(state),
         };
     }
 
@@ -128,6 +128,134 @@ fn wizard_credentials(state: &EasyHarvest) -> Element<'_, Message> {
             ]
             .align_y(Alignment::Center),
             connection_error(state),
+        ]
+        .spacing(SECTION_GAP),
+    )
+    .style(card_style)
+    .padding(18)
+    .max_width(420);
+
+    container(card).center(Length::Fill).into()
+}
+
+// ── Wizard: step 2 — work profile ────────────────────────────────────────────
+
+fn wizard_profile(state: &EasyHarvest) -> Element<'_, Message> {
+    let error_el: Element<Message> = if let Some(err) = &state.settings_form.profile_error {
+        text(err.as_str()).font(FONT_REGULAR).size(12).color(DANGER).into()
+    } else {
+        Space::new().into()
+    };
+
+    // Label showing derived full-time hours next to the weekly-hours input.
+    let eff_label = {
+        let pct: f64 = state.settings_form.percentage_input
+            .replace(',', ".")
+            .parse()
+            .unwrap_or(100.0);
+        let hrs: f64 = state.settings_form.weekly_hours_input
+            .replace(',', ".")
+            .parse()
+            .unwrap_or(state.settings.total_weekly_hours);
+        let full_time = if pct > 0.0 { hrs / pct * 100.0 } else { state.settings.total_weekly_hours };
+        format!("h/week  ({:.1}h full-time)", full_time)
+    };
+
+    let card = container(
+        column![
+            text("Set up your work profile")
+                .font(FONT_SEMIBOLD)
+                .size(20)
+                .color(TEXT_PRIMARY),
+            text("You can adjust these any time in Settings.")
+                .font(FONT_REGULAR)
+                .size(12)
+                .color(TEXT_MUTED),
+            // Pensum row
+            row![
+                text("Pensum")
+                    .font(FONT_REGULAR)
+                    .size(13)
+                    .color(TEXT_MUTED)
+                    .width(Length::Fill),
+                text_input("100", &state.settings_form.percentage_input)
+                    .on_input(|v| Message::Settings(SettingsMsg::WizardPensumChanged(v)))
+                    .size(13)
+                    .padding([7, 8])
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .style(input_style)
+                    .width(72),
+                Space::new().width(8).height(8),
+                text("%").font(FONT_REGULAR).size(12).color(TEXT_MUTED).width(84),
+            ]
+            .align_y(Alignment::Center),
+            // Weekly hours row (auto-filled from pensum, overridable)
+            row![
+                text("Weekly hours")
+                    .font(FONT_REGULAR)
+                    .size(13)
+                    .color(TEXT_MUTED)
+                    .width(Length::Fill),
+                text_input("41", &state.settings_form.weekly_hours_input)
+                    .on_input(|v| Message::Settings(SettingsMsg::WizardWeeklyHoursChanged(v)))
+                    .size(13)
+                    .padding([7, 8])
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .style(input_style)
+                    .width(72),
+                Space::new().width(8).height(8),
+                text(eff_label).font(FONT_REGULAR).size(12).color(TEXT_MUTED).width(Length::Fill),
+            ]
+            .align_y(Alignment::Center),
+            // Vacation days row
+            row![
+                text("Vacation days / year")
+                    .font(FONT_REGULAR)
+                    .size(13)
+                    .color(TEXT_MUTED)
+                    .width(Length::Fill),
+                text_input("25", &state.settings_form.holidays_input)
+                    .on_input(|v| Message::Settings(SettingsMsg::HolidaysChanged(v)))
+                    .size(13)
+                    .padding([7, 8])
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .style(input_style)
+                    .width(72),
+                Space::new().width(92),
+            ]
+            .align_y(Alignment::Center),
+            // First work day row
+            row![
+                column![
+                    text("First work day")
+                        .font(FONT_REGULAR)
+                        .size(13)
+                        .color(TEXT_MUTED),
+                    text("DD.MM.YYYY — leave blank if the date doesn't matter.")
+                        .font(FONT_REGULAR)
+                        .size(11)
+                        .color(TEXT_MUTED),
+                ]
+                .spacing(1)
+                .width(Length::Fill),
+                text_input("DD.MM.YYYY", &state.settings_form.first_work_day_input)
+                    .on_input(|v| Message::Settings(SettingsMsg::FirstWorkDayChanged(v)))
+                    .size(13)
+                    .padding([7, 8])
+                    .style(input_style)
+                    .width(100),
+                Space::new().width(92),
+            ]
+            .align_y(Alignment::Center),
+            error_el,
+            row![
+                outline_btn("Skip for now")
+                    .on_press(Message::Settings(SettingsMsg::WizardBack)),
+                Space::new().width(Length::Fill),
+                primary_btn("Get started  →")
+                    .on_press(Message::Settings(SettingsMsg::WizardProfileContinue)),
+            ]
+            .align_y(Alignment::Center),
         ]
         .spacing(SECTION_GAP),
     )

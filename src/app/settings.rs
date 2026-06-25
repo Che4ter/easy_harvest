@@ -1,6 +1,12 @@
 use super::*;
 use super::tasks::format_harvest_error;
 
+/// Format an f64 for display in numeric fields: one decimal, trailing zeros stripped.
+fn fmt_hours(v: f64) -> String {
+    let s = format!("{:.1}", v);
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 // ── Settings sub-state ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default)]
@@ -28,6 +34,9 @@ pub struct SettingsFormState {
     pub data_dir_saved: bool,
     /// Cached deduped task list for holiday_tasks_section: (task_id, task_name, context).
     pub cached_task_list: Vec<(i64, String, String)>,
+    /// True once the user has manually edited the weekly hours field in the wizard,
+    /// preventing pensum changes from overwriting it.
+    pub wizard_hours_manual: bool,
 }
 
 impl SettingsFormState {
@@ -142,6 +151,13 @@ pub enum SettingsMsg {
     TemplateAddSave,
     TemplateDelete(usize),
 
+    /// Wizard step 2: pensum changed — auto-update weekly hours unless manually set.
+    WizardPensumChanged(String),
+    /// Wizard step 2: user manually edited weekly hours — stops auto-calc.
+    WizardWeeklyHoursChanged(String),
+    /// Wizard step 2: validate, save profile, and navigate to the Day view.
+    WizardProfileContinue,
+
     /// Kick off background stats-fetch for every past year whose carryover[year+1] is
     /// still missing.  Triggered automatically on startup and by the Reset button.
     CarryoverSyncStart,
@@ -216,8 +232,14 @@ impl EasyHarvest {
             }
 
             SettingsMsg::WizardBack => {
-                self.wizard_step = 0;
-                self.settings_form.data_dir_input = self.settings.data_dir.display().to_string();
+                if self.wizard_step == 2 {
+                    // "Skip for now" — exit the profile step without saving.
+                    self.wizard_step = 1;
+                    self.page = Page::Day;
+                } else {
+                    self.wizard_step = 0;
+                    self.settings_form.data_dir_input = self.settings.data_dir.display().to_string();
+                }
                 Task::none()
             }
 
@@ -294,13 +316,131 @@ impl EasyHarvest {
                         // so every request is filtered to the current user.
                         self.harvest_user_id = None;
                         let task = self.load_current_user_task();
-                        self.page = Page::Day;
+                        // Pre-fill wizard profile form from current settings defaults.
+                        let eff = self.settings.total_weekly_hours * self.settings.work_percentage;
+                        let pct = self.settings.work_percentage * 100.0;
+                        self.settings_form.weekly_hours_input = fmt_hours(eff);
+                        self.settings_form.percentage_input = fmt_hours(pct);
+                        self.settings_form.first_work_day_input = self.settings
+                            .first_work_day
+                            .map(|d| d.format("%d.%m.%Y").to_string())
+                            .unwrap_or_default();
+                        self.settings_form.holidays_input =
+                            self.settings.total_holiday_days_per_year.to_string();
+                        self.settings_form.wizard_hours_manual = false;
+                        self.settings_form.profile_error = None;
+                        self.wizard_step = 2;
                         task
                     }
                     Err(e) => {
                         self.settings_form.error = Some(e);
                         Task::none()
                     }
+                }
+            }
+
+            SettingsMsg::WizardPensumChanged(v) => {
+                if !self.settings_form.wizard_hours_manual {
+                    if let Ok(pct) = v.replace(',', ".").parse::<f64>() {
+                        if pct > 0.0 {
+                            let full_time = self.settings.total_weekly_hours;
+                            self.settings_form.weekly_hours_input =
+                                fmt_hours(full_time * pct / 100.0);
+                        }
+                    }
+                }
+                self.settings_form.percentage_input = v;
+                self.settings_form.profile_error = None;
+                Task::none()
+            }
+
+            SettingsMsg::WizardWeeklyHoursChanged(v) => {
+                self.settings_form.wizard_hours_manual = true;
+                self.settings_form.weekly_hours_input = v;
+                self.settings_form.profile_error = None;
+                Task::none()
+            }
+
+            SettingsMsg::WizardProfileContinue => {
+                let pensum = match self.settings_form.percentage_input
+                    .replace(',', ".")
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|&v| v > 0.0 && v <= 100.0)
+                {
+                    Some(v) => v,
+                    None => {
+                        self.settings_form.profile_error =
+                            Some("Pensum must be between 1 and 100.".into());
+                        return Task::none();
+                    }
+                };
+                let eff_hours = match self.settings_form.weekly_hours_input
+                    .replace(',', ".")
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|&v| v > 0.0 && v <= 168.0)
+                {
+                    Some(v) => v,
+                    None => {
+                        self.settings_form.profile_error =
+                            Some("Weekly hours must be a positive number.".into());
+                        return Task::none();
+                    }
+                };
+                let raw_fwd = self.settings_form.first_work_day_input.trim().to_string();
+                let first_work_day = if raw_fwd.is_empty() {
+                    None
+                } else {
+                    match chrono::NaiveDate::parse_from_str(&raw_fwd, "%d.%m.%Y") {
+                        Ok(d) => Some(d),
+                        Err(_) => {
+                            self.settings_form.profile_error =
+                                Some("Invalid first work day — use DD.MM.YYYY.".into());
+                            return Task::none();
+                        }
+                    }
+                };
+                let work_percentage = pensum / 100.0;
+                let total_weekly_hours = eff_hours / work_percentage;
+                if total_weekly_hours > 168.0 {
+                    self.settings_form.profile_error = Some(format!(
+                        "At {pensum}% pensum, {eff_hours}h/week implies {total_weekly_hours:.1}h full-time, which exceeds the 168h maximum."
+                    ));
+                    return Task::none();
+                }
+                let holidays: u32 = match self.settings_form.holidays_input.trim().parse() {
+                    Ok(h) => h,
+                    Err(_) => {
+                        self.settings_form.profile_error =
+                            Some("Vacation days must be a whole number.".into());
+                        return Task::none();
+                    }
+                };
+                let fwd_changed = self.settings.first_work_day != first_work_day;
+                self.settings.total_weekly_hours = total_weekly_hours;
+                self.settings.work_percentage = work_percentage;
+                self.settings.first_work_day = first_work_day;
+                self.settings.total_holiday_days_per_year = holidays;
+                // Sync form inputs so the Settings page shows the correct values.
+                self.settings_form.weekly_hours_input = fmt_hours(total_weekly_hours);
+                self.settings_form.percentage_input = fmt_hours(pensum);
+                self.settings_form.first_work_day_input = self.settings
+                    .first_work_day
+                    .map(|d| d.format("%d.%m.%Y").to_string())
+                    .unwrap_or_default();
+                if let Err(e) = self.settings.save() {
+                    self.settings_form.profile_error = Some(format!("Save failed: {e}"));
+                    return Task::none();
+                }
+                self.recompute_expected_hours();
+                self.recompute_vacation_summary();
+                self.wizard_step = 1; // clear wizard flag (client is set, so step 1 never shows)
+                self.page = Page::Day;
+                if fwd_changed {
+                    self.update_settings(SettingsMsg::CarryoverReset)
+                } else {
+                    Task::none()
                 }
             }
 
@@ -466,6 +606,7 @@ impl EasyHarvest {
                         return Task::none();
                     }
                 };
+                let fwd_changed = self.settings.first_work_day != profile.first_work_day;
                 self.settings.total_weekly_hours = profile.weekly_hours;
                 self.settings.work_percentage = profile.percentage;
                 self.settings.total_holiday_days_per_year = profile.holidays;
@@ -480,6 +621,12 @@ impl EasyHarvest {
                     Err(e) => {
                         self.settings_form.profile_error = Some(format!("Save failed: {e}"));
                     }
+                }
+                if fwd_changed {
+                    // Re-seed and re-sync so any carryover entries computed before
+                    // first_work_day was configured (or for a different start date)
+                    // don't carry incorrect values forward.
+                    return self.update_settings(SettingsMsg::CarryoverReset);
                 }
                 Task::none()
             }

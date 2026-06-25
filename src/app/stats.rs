@@ -108,7 +108,10 @@ impl EasyHarvest {
                         // picks it up automatically.  Past years are immutable so this
                         // only needs to run once; existing (manual) entries are preserved.
                         let year = self.overtime_year;
-                        if year < Local::now().naive_local().date().year() {
+                        let after_employment = self.settings.first_work_day
+                            .map(|d| year >= d.year())
+                            .unwrap_or(true);
+                        if year < Local::now().naive_local().date().year() && after_employment {
                             let next = year + 1;
                             if !self.settings.carryover.contains_key(&next) {
                                 if let (Some(bal), Some(hols)) =
