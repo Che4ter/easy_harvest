@@ -233,6 +233,28 @@ impl EasyHarvest {
                     return Task::none();
                 }
 
+                // M5-F3: validate that every break falls within the work-day
+                // envelope [start_time, end_time].  Breaks outside the envelope
+                // would produce negative or nonsensical worked-hours values.
+                if let (Some(ws), Some(we)) = (day.start_time, day.end_time) {
+                    for b in &breaks {
+                        if b.start < ws || b.start >= we {
+                            self.error_banner = Some(
+                                "Each break must start within the work day (start..end)".into()
+                            );
+                            return Task::none();
+                        }
+                        if let Some(be) = b.end {
+                            if be > we {
+                                self.error_banner = Some(
+                                    "Break end time must not exceed the work day end time".into()
+                                );
+                                return Task::none();
+                            }
+                        }
+                    }
+                }
+
                 day.breaks = breaks;
 
                 self.work_day_store.set(day);

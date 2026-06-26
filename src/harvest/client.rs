@@ -13,6 +13,10 @@ pub enum HarvestError {
     Api { status: u16, body: String },
     #[error("Rate limited — retry after {retry_after_secs}s")]
     RateLimited { retry_after_secs: u64 },
+    /// M3-F1/F2: non-ASCII characters in the token or account ID would
+    /// cause an `.expect()` panic; propagate the error instead.
+    #[error("Invalid header value (non-ASCII character in token or account ID): {0}")]
+    InvalidHeader(#[from] reqwest::header::InvalidHeaderValue),
 }
 
 #[derive(Clone)]
@@ -21,17 +25,19 @@ pub struct HarvestClient {
 }
 
 impl HarvestClient {
-    pub fn new(token: String, account_id: String) -> Result<Self, reqwest::Error> {
+    /// Create a new `HarvestClient`.
+    ///
+    /// Returns `Err(HarvestError::InvalidHeader)` when `token` or `account_id`
+    /// contains non-ASCII characters instead of panicking (M3-F1/F2).
+    pub fn new(token: String, account_id: String) -> Result<Self, HarvestError> {
         let mut headers = HeaderMap::new();
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {token}"))
-                .expect("token contains only ASCII"),
+            HeaderValue::from_str(&format!("Bearer {token}"))?,
         );
         headers.insert(
             "Harvest-Account-Id",
-            HeaderValue::from_str(&account_id)
-                .expect("account_id contains only ASCII"),
+            HeaderValue::from_str(&account_id)?,
         );
         headers.insert(
             USER_AGENT,
@@ -132,7 +138,7 @@ impl HarvestClient {
                 if let Some(to) = to {
                     req = req.query(&[("to", to)]);
                 }
-                req = req.query(&[("per_page", "2000")]);
+                req = req.query(&[("per_page", "100")]); // M3-F3: Harvest API max is 100
                 if let Some(page) = page {
                     req = req.query(&[("page", &page.to_string())]);
                 }
@@ -232,7 +238,7 @@ impl HarvestClient {
             .send_with_retry(|| {
                 let mut req =
                     self.request(reqwest::Method::GET, "/users/me/project_assignments");
-                req = req.query(&[("per_page", "2000")]);
+                req = req.query(&[("per_page", "100")]); // M3-F3: Harvest API max is 100
                 if let Some(page) = page {
                     req = req.query(&[("page", &page.to_string())]);
                 }
@@ -257,5 +263,35 @@ impl HarvestClient {
             page += 1;
         }
         Ok(all)
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// M3-F1: Invalid characters in the API token must return Err instead of panicking.
+    ///
+    /// The http-1.4.x crate accepts arbitrary bytes ≥ 32 (including non-ASCII UTF-8 bytes),
+    /// so the test uses a control character (NUL, 0x00) that is genuinely rejected by
+    /// `HeaderValue::from_str`.  Before the M3-F1 fix the code used `.expect()` and would
+    /// have panicked; now it returns `Err(HarvestError::InvalidHeader)`.
+    #[test]
+    fn harvest_client_new_rejects_non_ascii_token() {
+        // NUL byte (0x00) is < 32 and is rejected by HeaderValue::from_str.
+        let result = HarvestClient::new("token\x00value".to_string(), "123456".to_string());
+        assert!(result.is_err(), "token containing a control character must return Err(InvalidHeader)");
+    }
+
+    /// M3-F2: Invalid characters in the account ID must return Err instead of panicking.
+    ///
+    /// Uses a newline (0x0A) which is < 32 and is explicitly rejected by HeaderValue.
+    #[test]
+    fn harvest_client_new_rejects_non_ascii_account_id() {
+        // Newline (0x0A) is < 32 and is rejected by HeaderValue::from_str.
+        let result = HarvestClient::new("valid_token".to_string(), "12345\n6789".to_string());
+        assert!(result.is_err(), "account_id containing a newline must return Err(InvalidHeader)");
     }
 }

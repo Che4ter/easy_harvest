@@ -2,6 +2,8 @@
 /export
 /.vscode
 /.claude
+/docs
+.serena
 
 # Credentials — never commit these
 api.txt

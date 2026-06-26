@@ -249,6 +249,7 @@ pub struct EasyHarvest {
 
     // Generation counters — prevent stale async results from overwriting fresh data
     pub entries_gen: u64,
+    pub assignments_gen: u64,
     pub vacation_gen: u64,
     pub billable_gen: u64,
     pub stats_gen: u64,
@@ -415,6 +416,7 @@ impl EasyHarvest {
             loading: false,
             error_banner: None,
             entries_gen: 0,
+            assignments_gen: 0,
             vacation_gen: 0,
             billable_gen: 0,
             stats_gen: 0,
@@ -479,5 +481,67 @@ impl EasyHarvest {
         eprintln!("[startup] EasyHarvest::new total   {:?}", t0.elapsed());
 
         (state, task)
+    }
+
+    /// Construct a minimal `EasyHarvest` for unit tests.
+    ///
+    /// All I/O-backed sub-states are loaded from `data_dir`; they return
+    /// empty defaults when no files exist, which is correct for a blank temp
+    /// directory.  The Harvest client is `None` so any tasks that require a
+    /// live connection return `Task::none()` immediately.
+    #[cfg(test)]
+    pub(super) fn test_instance(data_dir: &std::path::Path) -> Self {
+        let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+        let settings = Settings { data_dir: data_dir.to_path_buf(), ..Default::default() };
+        let work_day_store = WorkDayStore::load(data_dir, today.year(), today.month());
+        let overtime_adjustments = OvertimeAdjustmentStore::load(data_dir);
+        let mut state = Self {
+            page: Page::Day,
+            settings,
+            client: None,
+            harvest_user_id: None,
+            assignments: Vec::new(),
+            favorites: Favorites::default(),
+            current_date: today,
+            entries: Vec::new(),
+            entry_form: None,
+            pending_delete: None,
+            work_day_store,
+            year_balance: None,
+            holiday_stats: None,
+            month_summaries: None,
+            loading: false,
+            error_banner: None,
+            entries_gen: 0,
+            assignments_gen: 0,
+            vacation_gen: 0,
+            billable_gen: 0,
+            stats_gen: 0,
+            project_tracking_gen: 0,
+            settings_form: SettingsFormState::new(today.year()),
+            template_form: TemplateFormState::default(),
+            work_day_edit: WorkDayEditState::default(),
+            vacation: VacationPageState::new(today.year()),
+            billable: BillablePageState::new(today.year()),
+            project_tracking: ProjectTrackingPageState::new(data_dir, today.year()),
+            date_picker: DatePickerState::new(today),
+            window_id: None,
+            tray_available: false,
+            window_visible: false,
+            update_available: None,
+            wizard_step: 1,
+            overtime_year: today.year(),
+            overtime_adjustments,
+            overtime_adj_form: None,
+            templates: Templates::default(),
+            cached_project_options: Vec::new(),
+            cached_expected_hours: 0.0,
+            #[cfg(not(target_os = "macos"))]
+            tray_phase: std::sync::Arc::new(std::sync::Mutex::new(WorkPhase::default())),
+            #[cfg(not(target_os = "macos"))]
+            tray_update_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
+        };
+        state.recompute_expected_hours();
+        state
     }
 }

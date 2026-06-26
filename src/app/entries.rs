@@ -8,6 +8,9 @@ pub struct EntryForm {
     pub editing_id: Option<i64>,
     pub project_query: String,
     pub selected_project_idx: Option<usize>,
+    /// M4-F2: stable (project_id, task_id) key that survives an assignments
+    /// refresh — preferred over the index in Submit to avoid stale-index bugs.
+    pub selected_project_key: Option<(i64, i64)>,
     pub hours_input: String,
     pub notes_input: String,
     pub error: Option<String>,
@@ -19,6 +22,7 @@ impl EntryForm {
             editing_id: None,
             project_query: String::new(),
             selected_project_idx: None,
+            selected_project_key: None,
             hours_input: String::new(),
             notes_input: String::new(),
             error: None,
@@ -33,6 +37,7 @@ impl EntryForm {
         let idx = options.iter().position(|o| {
             o.project_id == entry.project.id && o.task_id == entry.task.id
         });
+        let key = Some((entry.project.id, entry.task.id));
         Self {
             editing_id: Some(entry.id),
             project_query: if let Some(i) = idx {
@@ -41,6 +46,7 @@ impl EntryForm {
                 display
             },
             selected_project_idx: idx,
+            selected_project_key: key,
             hours_input: crate::ui::format_hhmm(entry.hours),
             notes_input: entry.notes.clone().unwrap_or_default(),
             error: None,
@@ -59,7 +65,7 @@ impl Default for EntryForm {
 #[derive(Debug, Clone)]
 pub enum EntryMsg {
     Loaded(u64, Result<Vec<TimeEntry>, String>),
-    AssignmentsLoaded(Result<Vec<ProjectAssignment>, String>),
+    AssignmentsLoaded(u64, Result<Vec<ProjectAssignment>, String>),
     SyncAssignments,
     ShowForm,
     Edit(i64),
@@ -100,7 +106,10 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            EntryMsg::AssignmentsLoaded(result) => {
+            EntryMsg::AssignmentsLoaded(r#gen, result) => {
+                // M4-F3: discard stale responses that arrived after a newer load
+                // was dispatched (e.g. user switched pages mid-request).
+                if r#gen != self.assignments_gen { return Task::none(); }
                 match result {
                     Ok(assignments) => {
                         self.assignments = assignments;
@@ -112,7 +121,10 @@ impl EasyHarvest {
                 Task::none()
             }
 
-            EntryMsg::SyncAssignments => self.force_load_assignments_task(),
+            EntryMsg::SyncAssignments => {
+                self.assignments_gen += 1;
+                self.force_load_assignments_task()
+            }
 
             EntryMsg::ShowForm => {
                 self.entry_form = Some(EntryForm::new());
@@ -135,6 +147,7 @@ impl EasyHarvest {
                 if let Some(form) = &mut self.entry_form {
                     form.project_query = q;
                     form.selected_project_idx = None;
+                    form.selected_project_key = None;
                 }
                 Task::none()
             }
@@ -145,6 +158,9 @@ impl EasyHarvest {
                     if let Some(opt) = options.get(idx) {
                         form.project_query = opt.search_text.clone();
                         form.selected_project_idx = Some(idx);
+                        // M4-F2: also store the stable key so Submit can re-resolve
+                        // after an assignments refresh invalidates the index.
+                        form.selected_project_key = Some((opt.project_id, opt.task_id));
                     }
                 }
                 Task::none()
@@ -187,15 +203,21 @@ impl EasyHarvest {
                 };
 
                 let options = self.cached_project_options.clone();
-                let opt = match form.selected_project_idx {
-                    Some(idx) => options.get(idx).cloned(),
-                    None => options
+                // M4-F2: prefer the stable (project_id, task_id) key — it survives
+                // an assignments refresh that would invalidate the stored index.
+                let opt = match form.selected_project_key {
+                    Some((project_id, task_id)) => options
                         .iter()
-                        .find(|o| {
-                            o.search_text.to_lowercase()
-                                == form.project_query.to_lowercase()
-                        })
+                        .find(|o| o.project_id == project_id && o.task_id == task_id)
                         .cloned(),
+                    None => form.selected_project_idx
+                        .and_then(|idx| options.get(idx).cloned())
+                        .or_else(|| {
+                            options.iter().find(|o| {
+                                o.search_text.to_lowercase()
+                                    == form.project_query.to_lowercase()
+                            }).cloned()
+                        }),
                 };
 
                 let Some(opt) = opt else {
@@ -349,8 +371,22 @@ impl EasyHarvest {
             EntryMsg::TimerStarted(result) => {
                 match result {
                     Ok(updated) => {
-                        if let Some(e) = self.entries.iter_mut().find(|e| e.id == updated.id) {
-                            *e = updated;
+                        // M4-F5: discard responses for entries that belong to a
+                        // different date — the user navigated away while the request
+                        // was in flight, so these entries are no longer displayed.
+                        let current = self.current_date.format("%Y-%m-%d").to_string();
+                        if updated.spent_date != current {
+                            return Task::none();
+                        }
+                        // M4-F1: Harvest allows only one running timer at a time;
+                        // clear is_running on all other entries so the UI stays
+                        // consistent with the server state.
+                        for e in &mut self.entries {
+                            if e.id == updated.id {
+                                *e = updated.clone();
+                            } else {
+                                e.is_running = false;
+                            }
                         }
                     }
                     Err(e) => self.error_banner = Some(e),
@@ -361,6 +397,11 @@ impl EasyHarvest {
             EntryMsg::TimerStopped(result) => {
                 match result {
                     Ok(updated) => {
+                        // M4-F5: discard stale responses for a different date.
+                        let current = self.current_date.format("%Y-%m-%d").to_string();
+                        if updated.spent_date != current {
+                            return Task::none();
+                        }
                         if let Some(e) = self.entries.iter_mut().find(|e| e.id == updated.id) {
                             *e = updated;
                         }
@@ -413,6 +454,8 @@ impl EasyHarvest {
                     form.project_query =
                         format!("{} \u{203a} {} \u{2014} {}", opt.client_name, opt.project_name, opt.task_name);
                     form.selected_project_idx = Some(p);
+                    // M4-F2: store stable key alongside the index.
+                    form.selected_project_key = Some((opt.project_id, opt.task_id));
                 }
                 form.hours_input = tpl.hours.clone();
                 form.notes_input = tpl.notes.clone();

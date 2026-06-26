@@ -77,10 +77,18 @@ impl SettingsFormState {
             .ok()
             .filter(|y: &i32| (2000..=2100).contains(y))
             .ok_or_else(|| "Invalid year (2000\u{2013}2100)".to_string())?;
-        let holiday_hours: f64 = self.carryover_holiday_input.replace(',', ".").parse()
-            .map_err(|_| "Invalid vacation hours".to_string())?;
-        let overtime_hours: f64 = self.carryover_overtime_input.replace(',', ".").parse()
-            .map_err(|_| "Invalid overtime hours".to_string())?;
+        // M2-F3: reject non-finite values (NaN / Infinity) — they would silently
+        // corrupt carryover calculations downstream.
+        let holiday_hours: f64 = self.carryover_holiday_input.replace(',', ".")
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| "Invalid vacation hours".to_string())?;
+        let overtime_hours: f64 = self.carryover_overtime_input.replace(',', ".")
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| "Invalid overtime hours".to_string())?;
         Ok(ValidatedCarryover { year, holiday_hours, overtime_hours })
     }
 }
@@ -409,11 +417,16 @@ impl EasyHarvest {
                     ));
                     return Task::none();
                 }
-                let holidays: u32 = match self.settings_form.holidays_input.trim().parse() {
-                    Ok(h) => h,
-                    Err(_) => {
+                let holidays: u32 = match self.settings_form.holidays_input
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|&v| v <= 365)
+                {
+                    Some(h) => h,
+                    None => {
                         self.settings_form.profile_error =
-                            Some("Vacation days must be a whole number.".into());
+                            Some("Vacation days must be a whole number (0–365).".into());
                         return Task::none();
                     }
                 };
@@ -511,6 +524,9 @@ impl EasyHarvest {
                     holiday_hours: validated.holiday_hours,
                     overtime_hours: validated.overtime_hours,
                     legacy_holiday_days: 0.0,
+                    // Mark as user-defined so CarryoverReset preserves it and
+                    // CarryoverSyncLoaded does not overwrite it.
+                    is_user_defined: true,
                 });
                 match self.settings.save() {
                     Ok(()) => {
@@ -540,8 +556,11 @@ impl EasyHarvest {
             }
 
             SettingsMsg::CarryoverReset => {
-                // Clear all auto-computed entries and keep only the first-year seed.
-                self.settings.carryover.clear();
+                // Keep only user-defined entries; clear all auto-computed ones.
+                self.settings.carryover.retain(|_, v| v.is_user_defined);
+                // Re-seed the first-year zero entry so the auto-compute chain has a
+                // known starting point — but only if it doesn't already exist as
+                // a user-defined entry.
                 if let Some(fwd) = self.settings.first_work_day {
                     self.settings.carryover
                         .entry(fwd.year())
@@ -572,26 +591,38 @@ impl EasyHarvest {
             }
 
             SettingsMsg::CarryoverSyncLoaded(year, result) => {
+                let next = year + 1;
                 match result {
                     Ok((balance, holidays)) => {
-                        let next = year + 1;
-                        let epd = self.settings.expected_hours_per_day();
-                        self.settings.carryover.insert(
-                            next,
-                            crate::state::settings::YearCarryover {
-                                overtime_hours: balance.total_balance,
-                                holiday_hours: holidays.days_remaining * epd,
-                                ..Default::default()
-                            },
-                        );
-                        let _ = self.settings.save();
-                        self.recompute_vacation_summary();
+                        // M1-F2/M2-F4: skip overwrite when the user has manually
+                        // defined a carryover for `next` — preserve their value.
+                        let user_defined = self.settings.carryover
+                            .get(&next)
+                            .map_or(false, |c| c.is_user_defined);
+                        if !user_defined {
+                            let epd = self.settings.expected_hours_per_day();
+                            self.settings.carryover.insert(
+                                next,
+                                crate::state::settings::YearCarryover {
+                                    overtime_hours: balance.total_balance,
+                                    holiday_hours: holidays.days_remaining * epd,
+                                    ..Default::default()
+                                },
+                            );
+                            self.save_settings_or_warn();
+                            self.recompute_vacation_summary();
+                        }
                     }
-                    Err(e) => {
-                        // Non-fatal: silently ignore background errors to avoid
-                        // spamming the user.  The entry will simply remain absent
-                        // and can be retried via the Reset button.
-                        let _ = e;
+                    Err(_e) => {
+                        // M1-F1: insert a zero-value tombstone so CarryoverSyncStart
+                        // does not loop on this year indefinitely.  Without the
+                        // tombstone the chain re-fires for the same year forever.
+                        // Only insert if no entry already exists (don't overwrite
+                        // a user-defined value with a zero tombstone).
+                        if !self.settings.carryover.contains_key(&next) {
+                            self.settings.carryover.insert(next, Default::default());
+                            self.save_settings_or_warn();
+                        }
                     }
                 }
                 // Chain to the next missing year (if any).
@@ -648,8 +679,12 @@ impl EasyHarvest {
             }
 
             SettingsMsg::HolidayViewYearPrev => {
-                self.settings_form.holiday_view_year -= 1;
-                self.settings_form.cached_holidays = swiss_public_holidays(self.settings_form.holiday_view_year);
+                // M2-F6: guard against unbounded decrement — swiss_public_holidays
+                // panics for very early years (e.g. year 0 in Easter algorithm).
+                if self.settings_form.holiday_view_year > 2000 {
+                    self.settings_form.holiday_view_year -= 1;
+                    self.settings_form.cached_holidays = swiss_public_holidays(self.settings_form.holiday_view_year);
+                }
                 Task::none()
             }
 
@@ -821,6 +856,7 @@ impl EasyHarvest {
                 if self.client.is_some() {
                     self.loading = true;
                     self.entries_gen += 1;
+                    self.assignments_gen += 1;
                     Task::batch([
                         self.load_entries_task(),
                         self.load_assignments_task(),

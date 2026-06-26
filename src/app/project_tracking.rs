@@ -37,7 +37,9 @@ impl BudgetForm {
         }
         let budget_hours: f64 = self.budget_hours_input.replace(',', ".").parse()
             .ok()
-            .filter(|&v: &f64| v > 0.0)
+            // M5-F2: also exclude non-finite values (Infinity, NaN) — they pass the
+            // `v > 0.0` check but corrupt budget-remaining calculations downstream.
+            .filter(|&v: &f64| v.is_finite() && v > 0.0)
             .ok_or_else(|| "Enter a valid positive number for budget hours.".to_string())?;
         if self.selected_projects.is_empty() {
             return Err("Select at least one project.".into());

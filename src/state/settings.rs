@@ -23,6 +23,11 @@ pub struct YearCarryover {
     /// Overtime hours carried into this year (positive = banked, negative = deficit).
     #[serde(default)]
     pub overtime_hours: f64,
+    /// True when the user manually entered this entry via the Settings UI.
+    /// Auto-computed entries (from CarryoverSyncLoaded / StatsMsg::Loaded) are
+    /// false so that a Reset clears them while preserving manual overrides.
+    #[serde(default)]
+    pub is_user_defined: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +184,12 @@ impl Settings {
     /// When `first_work_day` falls within `year`, entitlement is prorated by
     /// the fraction of the year actually worked.
     pub fn effective_holiday_days_for(&self, year: i32) -> f64 {
+        // M2-F2: years entirely before employment started contribute zero entitlement.
+        if let Some(fwd) = self.first_work_day {
+            if year < fwd.year() {
+                return 0.0;
+            }
+        }
         let base = if let Some(fwd) = self.first_work_day {
             if fwd.year() == year {
                 let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
@@ -260,12 +271,24 @@ impl Settings {
 
     pub fn load(data_dir: &Path) -> Self {
         let path = Self::settings_path(data_dir);
+        // M2-F5: clamp individual invalid fields rather than discarding the entire
+        // settings struct on validation failure — all other fields (account_id,
+        // carryover, holiday_task_ids, etc.) are preserved.
         let mut settings: Self = super::io::load_json(&path)
-            .and_then(|s: Self| s.validate().ok().map(|_| s))
             .unwrap_or_else(|| Self {
                 data_dir: data_dir.to_path_buf(),
                 ..Default::default()
             });
+        if settings.total_weekly_hours.is_nan()
+            || !(0.0..=168.0).contains(&settings.total_weekly_hours)
+        {
+            settings.total_weekly_hours = default_total_weekly_hours();
+        }
+        if settings.work_percentage.is_nan()
+            || !(0.0..=1.0).contains(&settings.work_percentage)
+        {
+            settings.work_percentage = default_work_percentage();
+        }
         settings.data_dir = data_dir.to_path_buf();
         settings.autostart = crate::autostart::is_enabled();
         // Seed year-0 carryover (both 0) so the auto-compute chain has a known
@@ -390,7 +413,7 @@ mod tests {
     fn test_effective_holiday_days_with_carryover() {
         let mut carryover = std::collections::HashMap::new();
         // 3.5 days at 80% (6.56 h/day) = 22.96 h
-        carryover.insert(2026, YearCarryover { holiday_hours: 22.96, overtime_hours: 0.0, legacy_holiday_days: 0.0 });
+        carryover.insert(2026, YearCarryover { holiday_hours: 22.96, overtime_hours: 0.0, legacy_holiday_days: 0.0, is_user_defined: false });
         let s = Settings {
             total_holiday_days_per_year: 25,
             work_percentage: 0.8,
@@ -422,9 +445,10 @@ mod tests {
             first_work_day: Some(NaiveDate::from_ymd_opt(2025, 11, 15).unwrap()),
             ..Default::default()
         };
-        // Non-first years get full entitlement regardless of work_percentage.
+        // Post-employment years get full entitlement regardless of work_percentage.
         assert_eq!(s.effective_holiday_days_for(2026), 25.0);
-        assert_eq!(s.effective_holiday_days_for(2024), 25.0);
+        // M2-F2: years before employment started must return 0, not full entitlement.
+        assert_eq!(s.effective_holiday_days_for(2024), 0.0);
     }
 
     #[test]
@@ -667,7 +691,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut carryover = std::collections::HashMap::new();
         // 2 days at 80% (6.56 h/day) = 13.12 h
-        carryover.insert(2026, YearCarryover { holiday_hours: 13.12, overtime_hours: 5.5, legacy_holiday_days: 0.0 });
+        carryover.insert(2026, YearCarryover { holiday_hours: 13.12, overtime_hours: 5.5, legacy_holiday_days: 0.0, is_user_defined: false });
         let settings = Settings {
             account_id: "12345".into(),
             data_dir: dir.path().to_path_buf(),
@@ -710,7 +734,7 @@ mod tests {
         // Carryover stored for 2025 must NOT appear when querying 2026.
         let mut carryover = std::collections::HashMap::new();
         // 5 days at 100% (8.2 h/day) = 41.0 h
-        carryover.insert(2025, YearCarryover { holiday_hours: 41.0, overtime_hours: 10.0, legacy_holiday_days: 0.0 });
+        carryover.insert(2025, YearCarryover { holiday_hours: 41.0, overtime_hours: 10.0, legacy_holiday_days: 0.0, is_user_defined: false });
         let s = Settings {
             total_holiday_days_per_year: 25,
             carryover,
@@ -728,8 +752,8 @@ mod tests {
         // Two carryover entries — each year returns only its own values.
         let mut carryover = std::collections::HashMap::new();
         // 2 days at 100% (8.2 h/day) = 16.4 h; 3.5 days = 28.7 h
-        carryover.insert(2025, YearCarryover { holiday_hours: 16.4, overtime_hours: 8.0, legacy_holiday_days: 0.0 });
-        carryover.insert(2026, YearCarryover { holiday_hours: 28.7, overtime_hours: -4.0, legacy_holiday_days: 0.0 });
+        carryover.insert(2025, YearCarryover { holiday_hours: 16.4, overtime_hours: 8.0, legacy_holiday_days: 0.0, is_user_defined: false });
+        carryover.insert(2026, YearCarryover { holiday_hours: 28.7, overtime_hours: -4.0, legacy_holiday_days: 0.0, is_user_defined: false });
         let s = Settings {
             total_holiday_days_per_year: 25,
             carryover,
@@ -746,14 +770,14 @@ mod tests {
         // Inserting a new entry for the same year must replace the old one.
         let mut carryover = std::collections::HashMap::new();
         // 5 days at 100% (8.2 h/day) = 41.0 h
-        carryover.insert(2026, YearCarryover { holiday_hours: 41.0, overtime_hours: 20.0, legacy_holiday_days: 0.0 });
+        carryover.insert(2026, YearCarryover { holiday_hours: 41.0, overtime_hours: 20.0, legacy_holiday_days: 0.0, is_user_defined: false });
         let mut s = Settings {
             total_holiday_days_per_year: 25,
             carryover,
             ..Default::default()
         };
         // Overwrite with corrected values: 3 days = 24.6 h
-        s.carryover.insert(2026, YearCarryover { holiday_hours: 24.6, overtime_hours: 12.0, legacy_holiday_days: 0.0 });
+        s.carryover.insert(2026, YearCarryover { holiday_hours: 24.6, overtime_hours: 12.0, legacy_holiday_days: 0.0, is_user_defined: false });
         assert!((s.effective_holiday_days_for(2026) - 28.0).abs() < 1e-9);
         assert_eq!(s.overtime_carryover_for(2026), 12.0);
         assert_eq!(s.carryover.len(), 1);
@@ -774,7 +798,7 @@ mod tests {
 
         let mut carryover = std::collections::HashMap::new();
         // 2 days at 100% (8.2 h/day) = 16.4 h
-        carryover.insert(2025, YearCarryover { holiday_hours: 16.4, overtime_hours: 0.0, legacy_holiday_days: 0.0 });
+        carryover.insert(2025, YearCarryover { holiday_hours: 16.4, overtime_hours: 0.0, legacy_holiday_days: 0.0, is_user_defined: false });
         let s = Settings {
             total_holiday_days_per_year: 25,
             first_work_day: Some(fwd),

@@ -66,6 +66,7 @@ impl EasyHarvest {
                         // data loads so every request is properly filtered.
                         self.loading = true;
                         self.entries_gen += 1;
+                        self.assignments_gen += 1;
                         Task::batch([
                             self.load_entries_task(),
                             self.load_assignments_task(),
@@ -161,6 +162,11 @@ impl EasyHarvest {
     fn update_navigation(&mut self, msg: NavMsg) -> Task<Message> {
         match msg {
             NavMsg::PageChanged(page) => {
+                // M4-F4: ensure the date-picker popup is always dismissed when the
+                // user navigates to a new page — it is not visible on other pages.
+                self.date_picker.open = false;
+                // M4-F6: dismiss work-day editor on page change
+                self.work_day_edit = WorkDayEditState::default();
                 // If the user navigates away while the profile wizard is open, dismiss it.
                 if page != Page::Settings && self.wizard_step == 2 {
                     self.wizard_step = 1;
@@ -171,6 +177,7 @@ impl EasyHarvest {
                     Page::Day => {
                         self.loading = true;
                         self.entries_gen += 1;
+                        self.assignments_gen += 1;
                         Task::batch([
                             self.load_entries_task(),
                             self.load_assignments_task(),

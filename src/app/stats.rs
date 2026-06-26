@@ -126,7 +126,9 @@ impl EasyHarvest {
                                             ..Default::default()
                                         },
                                     );
-                                    let _ = self.settings.save();
+                                    if let Err(e) = self.settings.save() {
+                                        self.error_banner = Some(format!("Failed to save settings: {e}"));
+                                    }
                                 }
                             }
                         }

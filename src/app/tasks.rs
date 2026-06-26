@@ -130,6 +130,7 @@ impl EasyHarvest {
             return Task::none();
         };
         let data_dir = self.settings.data_dir.clone();
+        let assignments_gen = self.assignments_gen;
         Task::perform(
             async move {
                 // Try cache first (24-hour TTL), unless the user explicitly requested a sync.
@@ -147,7 +148,8 @@ impl EasyHarvest {
                 let _ = ProjectCache::new(assignments.clone()).save(&data_dir);
                 Ok(assignments)
             },
-            |result| Message::Entry(Box::new(EntryMsg::AssignmentsLoaded(result))),
+            // M4-F3: pass the generation counter so stale responses are discarded.
+            move |result| Message::Entry(Box::new(EntryMsg::AssignmentsLoaded(assignments_gen, result))),
         )
     }
 
@@ -212,7 +214,11 @@ impl EasyHarvest {
                     expected_per_day,
                 );
                 let months = crate::stats::month_summaries(
-                    &all_entries,
+                    // M1-F4: month summaries must use ytd_entries (≤ balance_end) so
+                    // future entries in the current year don't inflate past-month
+                    // balances.  all_entries is used only for holiday stats, which
+                    // needs the full year to count booked future vacation.
+                    &ytd_entries,
                     year,
                     effective_start,
                     expected_per_day,
@@ -351,7 +357,16 @@ impl EasyHarvest {
                 for entry in entries {
                     match client.create_time_entry(&entry).await {
                         Ok(e) => created.push(e),
-                        Err(e) => return Err(e.to_string()),
+                        Err(e) => {
+                            // M1-F8: roll back any entries already created so the user
+                            // is not left with a partial vacation booking.  Best-effort
+                            // — individual deletion failures are silently ignored because
+                            // the user can always clean up manually.
+                            for created_entry in &created {
+                                let _ = client.delete_time_entry(created_entry.id).await;
+                            }
+                            return Err(e.to_string());
+                        }
                     }
                 }
                 Ok(created)
@@ -420,7 +435,9 @@ impl EasyHarvest {
             .filter_map(|e| {
                 NaiveDate::parse_from_str(&e.spent_date, "%Y-%m-%d")
                     .ok()
-                    .map(|d| (d, e.hours / expected_per_day))
+                    // M1-F3: guard against divide-by-zero when expected_per_day is 0
+                    // (e.g. 0% work percentage) — return 0 days rather than Infinity.
+                    .map(|d| (d, if expected_per_day > 0.0 { e.hours / expected_per_day } else { 0.0 }))
             })
             .fold((0.0_f64, 0.0_f64), |(used, booked), (d, days)| {
                 if d <= today { (used + days, booked) } else { (used, booked + days) }
@@ -619,5 +636,6 @@ pub(super) fn format_harvest_error(e: HarvestError) -> String {
         HarvestError::Unauthorized => {
             "Authentication failed. Please check your API token and Account ID.".into()
         }
+        HarvestError::InvalidHeader(e) => format!("Invalid header value: {e}"),
     }
 }
