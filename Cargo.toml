@@ -25,8 +25,8 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 
-# Credentials — no features here; platform stores are enabled below
-keyring = "3"
+# Credentials — v4 auto-selects the OS backend; no feature flags needed
+keyring = "4"
 
 # Directories
 dirs = "6"
@@ -51,13 +51,8 @@ features = ["gtk"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
-keyring = { version = "3", features = ["sync-secret-service"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3", features = ["windows-native"] }
 winreg = "0.56"
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 
