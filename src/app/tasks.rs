@@ -134,11 +134,10 @@ impl EasyHarvest {
         Task::perform(
             async move {
                 // Try cache first (24-hour TTL), unless the user explicitly requested a sync.
-                if !force {
-                    if let Some(cache) = ProjectCache::load(&data_dir)
-                        && cache.is_valid() {
-                            return Ok(cache.assignments);
-                        }
+                if !force
+                    && let Some(cache) = ProjectCache::load(&data_dir)
+                    && cache.is_valid() {
+                    return Ok(cache.assignments);
                 }
                 let assignments = client
                     .list_all_my_project_assignments()
@@ -213,12 +212,12 @@ impl EasyHarvest {
                     total_holiday_days,
                     expected_per_day,
                 );
-                let months = crate::stats::month_summaries(
-                    // M1-F4: month summaries must use ytd_entries (≤ balance_end) so
-                    // future entries in the current year don't inflate past-month
-                    // balances.  all_entries is used only for holiday stats, which
-                    // needs the full year to count booked future vacation.
-                    &ytd_entries,
+                // M1-F4: month summaries must use ytd_entries (≤ balance_end) so
+                // future entries in the current year don't inflate past-month
+                // balances.  all_entries is used only for holiday stats, which
+                // needs the full year to count booked future vacation.
+                let months = month_summaries_ytd(
+                    &all_entries,
                     year,
                     effective_start,
                     expected_per_day,
@@ -622,6 +621,37 @@ pub(super) fn build_vacation_entries(
         return Err("No workdays in selected range (weekends and holidays excluded).".into());
     }
     Ok(entries)
+}
+
+/// M1-F4: Compute month summaries using only entries up to `balance_end`
+/// (YTD-capped view).  The caller may pass the full `all_entries` slice;
+/// this function applies the `≤ balance_end` filter internally so that
+/// future entries in the current year do not inflate past-month totals.
+///
+/// Extracted from the `load_stats_task` closure so it can be unit-tested
+/// without an async client.
+pub(super) fn month_summaries_ytd(
+    all_entries: &[crate::harvest::models::TimeEntry],
+    year: i32,
+    effective_start: Option<chrono::NaiveDate>,
+    expected_per_day: f64,
+    public_holidays: &[crate::state::settings::PublicHoliday],
+    balance_end: chrono::NaiveDate,
+) -> Vec<crate::stats::MonthSummary> {
+    let balance_end_str = balance_end.format("%Y-%m-%d").to_string();
+    let ytd_entries: Vec<_> = all_entries
+        .iter()
+        .filter(|e| e.spent_date.as_str() <= balance_end_str.as_str())
+        .cloned()
+        .collect();
+    crate::stats::month_summaries(
+        &ytd_entries,
+        year,
+        effective_start,
+        expected_per_day,
+        public_holidays,
+        balance_end,
+    )
 }
 
 pub(super) fn format_harvest_error(e: HarvestError) -> String {

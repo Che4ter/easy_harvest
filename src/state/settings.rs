@@ -185,10 +185,9 @@ impl Settings {
     /// the fraction of the year actually worked.
     pub fn effective_holiday_days_for(&self, year: i32) -> f64 {
         // M2-F2: years entirely before employment started contribute zero entitlement.
-        if let Some(fwd) = self.first_work_day {
-            if year < fwd.year() {
-                return 0.0;
-            }
+        if let Some(fwd) = self.first_work_day
+            && year < fwd.year() {
+            return 0.0;
         }
         let base = if let Some(fwd) = self.first_work_day {
             if fwd.year() == year {

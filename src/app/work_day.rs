@@ -244,13 +244,12 @@ impl EasyHarvest {
                             );
                             return Task::none();
                         }
-                        if let Some(be) = b.end {
-                            if be > we {
-                                self.error_banner = Some(
-                                    "Break end time must not exceed the work day end time".into()
-                                );
-                                return Task::none();
-                            }
+                        if let Some(be) = b.end
+                            && be > we {
+                            self.error_banner = Some(
+                                "Break end time must not exceed the work day end time".into()
+                            );
+                            return Task::none();
                         }
                     }
                 }

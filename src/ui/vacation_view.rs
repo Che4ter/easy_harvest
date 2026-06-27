@@ -306,7 +306,9 @@ fn vacation_row(
         .map(|d| format!("{:2} {}", d.day(), month_abbr(d.month())))
         .unwrap_or_else(|_| entry.spent_date.clone());
 
-    let days = entry.hours / expected_per_day;
+    // M6-F4: guard against division by zero when expected_hours_per_day == 0.0
+    // (e.g. work_percentage not yet configured).
+    let days = if expected_per_day > 0.001 { entry.hours / expected_per_day } else { 0.0 };
     let day_str = if (days - 1.0).abs() < 0.02 {
         format!("1 day  ({:.2}h)", entry.hours)
     } else if (days - 0.5).abs() < 0.02 {

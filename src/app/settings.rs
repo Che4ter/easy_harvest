@@ -348,14 +348,12 @@ impl EasyHarvest {
             }
 
             SettingsMsg::WizardPensumChanged(v) => {
-                if !self.settings_form.wizard_hours_manual {
-                    if let Ok(pct) = v.replace(',', ".").parse::<f64>() {
-                        if pct > 0.0 {
-                            let full_time = self.settings.total_weekly_hours;
-                            self.settings_form.weekly_hours_input =
-                                fmt_hours(full_time * pct / 100.0);
-                        }
-                    }
+                if !self.settings_form.wizard_hours_manual
+                    && let Ok(pct) = v.replace(',', ".").parse::<f64>()
+                    && pct > 0.0 {
+                    let full_time = self.settings.total_weekly_hours;
+                    self.settings_form.weekly_hours_input =
+                        fmt_hours(full_time * pct / 100.0);
                 }
                 self.settings_form.percentage_input = v;
                 self.settings_form.profile_error = None;
@@ -564,7 +562,7 @@ impl EasyHarvest {
                 if let Some(fwd) = self.settings.first_work_day {
                     self.settings.carryover
                         .entry(fwd.year())
-                        .or_insert_with(Default::default);
+                        .or_default();
                 }
                 self.save_settings_or_warn();
                 self.recompute_vacation_summary();
@@ -598,7 +596,7 @@ impl EasyHarvest {
                         // defined a carryover for `next` — preserve their value.
                         let user_defined = self.settings.carryover
                             .get(&next)
-                            .map_or(false, |c| c.is_user_defined);
+                            .is_some_and(|c| c.is_user_defined);
                         if !user_defined {
                             let epd = self.settings.expected_hours_per_day();
                             self.settings.carryover.insert(
@@ -619,8 +617,10 @@ impl EasyHarvest {
                         // tombstone the chain re-fires for the same year forever.
                         // Only insert if no entry already exists (don't overwrite
                         // a user-defined value with a zero tombstone).
-                        if !self.settings.carryover.contains_key(&next) {
-                            self.settings.carryover.insert(next, Default::default());
+                        if let std::collections::hash_map::Entry::Vacant(e) =
+                            self.settings.carryover.entry(next)
+                        {
+                            e.insert(Default::default());
                             self.save_settings_or_warn();
                         }
                     }

@@ -734,9 +734,13 @@ fn carryover_sync_loaded_err_does_not_overwrite_user_defined() {
 /// non-billable one must be chosen so vacation entries don't appear on a client
 /// invoice.  The billable assignment is placed first to prove first-match is
 /// NOT used.
+///
+/// The selection logic is extracted into `vacation::select_holiday_project_id`
+/// so it can be tested without an Iced runtime or a Harvest client.
 #[test]
 fn vacation_submit_prefers_non_billable_project() {
     use crate::harvest::models::{ProjectAssignment, ProjectTaskAssignment};
+    use super::vacation::select_holiday_project_id;
 
     let task_id: i64 = 42;
 
@@ -767,23 +771,47 @@ fn vacation_submit_prefers_non_billable_project() {
         }],
     };
 
+    // Drive the real production selection function (called by FormSubmit handler).
     let assignments = vec![billable_pa, non_billable_pa];
-
-    // Mirror the M5-F1 selection logic from vacation.rs FormSubmit handler.
-    let candidates: Vec<_> = assignments.iter()
-        .filter(|a| a.task_assignments.iter().any(|t| t.task.id == task_id))
-        .collect();
-    let project_id = candidates.iter()
-        .find(|a| a.task_assignments.iter()
-            .any(|t| t.task.id == task_id && !t.billable.unwrap_or(true)))
-        .or_else(|| candidates.first())
-        .map(|a| a.project.id);
+    let project_id = select_holiday_project_id(&assignments, task_id);
 
     assert_eq!(
         project_id,
         Some(200),
         "non-billable project (id=200) must be preferred over the billable one (id=100)"
     );
+
+    // Additional: when ALL assignments are billable, fall back to the first one.
+    let billable_pa2 = ProjectAssignment {
+        id: 3,
+        project: ProjectRef { id: 300, name: "Billable 2".into(), code: None },
+        client: ClientRef { id: 1, name: "Client".into() },
+        is_active: true,
+        task_assignments: vec![ProjectTaskAssignment {
+            id: 3,
+            task: TaskRef { id: task_id, name: "Holiday".into() },
+            is_active: true,
+            billable: Some(true),
+        }],
+    };
+    let all_billable = vec![
+        ProjectAssignment {
+            id: 4,
+            project: ProjectRef { id: 400, name: "First Billable".into(), code: None },
+            client: ClientRef { id: 1, name: "Client".into() },
+            is_active: true,
+            task_assignments: vec![ProjectTaskAssignment {
+                id: 4,
+                task: TaskRef { id: task_id, name: "Holiday".into() },
+                is_active: true,
+                billable: Some(true),
+            }],
+        },
+        billable_pa2,
+    ];
+    let fallback_id = select_holiday_project_id(&all_billable, task_id);
+    assert_eq!(fallback_id, Some(400),
+        "when all projects are billable, first match (id=400) must be selected");
 }
 
 // ── M1-F3: recompute_vacation_summary with expected_per_day = 0.0 ─────────────
@@ -821,38 +849,37 @@ fn vacation_summary_zero_epd_no_nan() {
 
 // ── M1-F4: month_summaries uses YTD-capped entries ───────────────────────────
 
-/// M1-F4: month_summaries must only reflect entries up to the balance_end date
-/// (ytd_entries).  An entry dated in the future must not inflate any month's
-/// total_hours.
+/// M1-F4: `month_summaries_ytd` must only reflect entries up to `balance_end`.
+/// An entry dated in the future must not inflate any month's total_hours.
+///
+/// The filtering is done inside the extracted `tasks::month_summaries_ytd`
+/// helper (which `load_stats_task` calls) rather than in the caller.  Passing
+/// `all_entries` (with the future entry) exercises the fix directly: if the
+/// ytd filter were removed from `month_summaries_ytd`, July would get 8 h and
+/// the assertion below would fail.
 #[test]
 fn month_summaries_excludes_future_entries() {
-    use crate::stats::month_summaries;
+    use super::tasks::month_summaries_ytd;
 
-    // Current date in test_instance is 2025-01-15; balance_end == today.
+    // balance_end = 2025-01-15 (matches test_instance's current_date).
     let balance_end = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-    // Past entry: falls within ytd range.
+    // Past entry: falls within YTD range — must appear in January totals.
     let mut past = make_entry(1, 1, 1, 5.0, false);
     past.spent_date = "2025-01-10".into();
 
-    // Future entry: beyond balance_end — must not appear in monthly totals.
+    // Future entry: beyond balance_end — must be excluded from monthly totals.
     let mut future = make_entry(2, 1, 1, 8.0, false);
     future.spent_date = "2025-07-01".into();
 
-    // Simulate the ytd filter that tasks.rs applies before calling month_summaries.
+    // Pass all_entries (unfiltered) — the helper must apply the ytd cap itself.
     let all_entries = vec![past, future];
-    let ytd_entries: Vec<_> = all_entries
-        .iter()
-        .filter(|e| e.spent_date.as_str() <= balance_end.format("%Y-%m-%d").to_string().as_str())
-        .cloned()
-        .collect();
+    let summaries = month_summaries_ytd(&all_entries, 2025, None, 8.0, &[], balance_end);
 
-    let summaries = month_summaries(&ytd_entries, 2025, None, 8.0, &[], balance_end);
-
-    // July (month index 6) must have zero hours.
+    // July must have zero hours — the future entry must be excluded.
     let july = summaries.iter().find(|m| m.month == 7).expect("July summary must exist");
     assert_eq!(july.total_hours, 0.0,
-        "future entry in July must not appear in month summaries when ytd_entries is used");
+        "future entry in July must not appear when month_summaries_ytd applies the ytd cap");
 
     // January must still reflect the past entry.
     let jan = summaries.iter().find(|m| m.month == 1).expect("January summary must exist");
@@ -1022,3 +1049,143 @@ fn wizard_profile_continue_rejects_holidays_above_365() {
         "settings must not have been updated with the invalid value"
     );
 }
+
+// ── M6-F1: WizardBack from step 2 navigates forward into the app ──────────────
+
+/// M6-F1 regression test: dispatching WizardBack while wizard_step == 2 must
+/// navigate to Page::Day (skip forward), not back to the credentials screen.
+/// The bug was that WizardBack decremented wizard_step without setting page.
+#[test]
+fn wizard_back_from_step2_navigates_to_day() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut app = EasyHarvest::test_instance(tmp.path());
+
+    // Simulate the state after successful credential entry: client is set and
+    // the wizard has advanced to step 2 (profile configuration).
+    // test_instance sets client = None; stub it so the wizard_step == 2 path
+    // matches real conditions (client present, profile step open).
+    app.wizard_step = 2;
+    app.page = Page::Settings;
+
+    let _ = app.update_settings(SettingsMsg::WizardBack);
+
+    // Skip must navigate into the app, not back to credentials.
+    assert_eq!(
+        app.page,
+        Page::Day,
+        "WizardBack from step 2 must set page = Day (skip forward into app)"
+    );
+    // wizard_step must be != 2 so the profile wizard is no longer rendered.
+    assert_ne!(
+        app.wizard_step, 2,
+        "WizardBack from step 2 must leave wizard_step != 2 to hide the wizard overlay"
+    );
+}
+
+// ── M6-F2: ProjectSelected (project_tracking) uses active-only index ─────────
+
+/// M6-F2 verified not a bug: the view enumerates AFTER filter(is_active) and
+/// the handler uses .filter(is_active).nth(idx) — both use the same
+/// active-only subsequence. This test documents that with inactive assignments
+/// interspersed, clicking on an active one still selects the correct project.
+#[test]
+fn project_tracking_project_selected_correct_with_inactive_interspersed() {
+    use crate::harvest::models::ProjectAssignment;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+
+    // assignments = [inactive_B, active_A, active_C]
+    // active-only subsequence: [active_A (idx 0), active_C (idx 1)]
+    let inactive_b = ProjectAssignment {
+        id: 10,
+        project: ProjectRef { id: 1000, name: "Inactive B".into(), code: None },
+        client: ClientRef { id: 1, name: "Client".into() },
+        is_active: false,
+        task_assignments: vec![],
+    };
+    let active_a = ProjectAssignment {
+        id: 20,
+        project: ProjectRef { id: 2000, name: "Active A".into(), code: None },
+        client: ClientRef { id: 1, name: "Client".into() },
+        is_active: true,
+        task_assignments: vec![],
+    };
+    let active_c = ProjectAssignment {
+        id: 30,
+        project: ProjectRef { id: 3000, name: "Active C".into(), code: None },
+        client: ClientRef { id: 1, name: "Client".into() },
+        is_active: true,
+        task_assignments: vec![],
+    };
+    app.assignments = vec![inactive_b, active_a, active_c];
+
+    // Open the budget form
+    let _ = app.update_project_tracking(ProjectTrackingMsg::ShowForm);
+    assert!(app.project_tracking.form.is_some());
+
+    // Click the 2nd active project (active_C, active-only idx 1).
+    // The inactive_B at the start must NOT shift the index.
+    let _ = app.update_project_tracking(ProjectTrackingMsg::ProjectSelected(1));
+
+    let selected = &app.project_tracking.form.as_ref().unwrap().selected_projects;
+    assert_eq!(selected.len(), 1);
+    assert_eq!(
+        selected[0].0, 3000,
+        "active-only idx 1 must resolve to Active C (project_id 3000), not the inactive or Active A"
+    );
+}
+
+// ── M6-F3: EntryForm.submitting is cleared on Created/Updated error ───────────
+
+/// M6-F3: When an API response arrives with an error, the submitting flag must
+/// be cleared so the user can retry without dismissing the form.
+#[test]
+fn entry_form_submitting_cleared_on_created_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+
+    // Manually set up a form with submitting = true (as if a request is in flight).
+    let mut form = EntryForm::new();
+    form.submitting = true;
+    app.entry_form = Some(form);
+
+    // Simulate a network error response for a create attempt.
+    let _ = app.update_entries(EntryMsg::Created(Err("network timeout".into())));
+
+    let f = app.entry_form.as_ref()
+        .expect("form must still be present after a create error");
+    assert!(!f.submitting,
+        "submitting must be reset to false after Created(Err(...)) so the user can retry");
+    assert!(f.error.is_some(),
+        "error message must be set for the user to see");
+}
+
+/// M6-F3: Same as above for the update path.
+#[test]
+fn entry_form_submitting_cleared_on_updated_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+
+    let mut form = EntryForm::new();
+    form.editing_id = Some(42);
+    form.submitting = true;
+    app.entry_form = Some(form);
+
+    let _ = app.update_entries(EntryMsg::Updated(Err("server error".into())));
+
+    let f = app.entry_form.as_ref()
+        .expect("form must still be present after an update error");
+    assert!(!f.submitting,
+        "submitting must be reset to false after Updated(Err(...)) so the user can retry");
+    assert!(f.error.is_some());
+}
+
+// ── M6-F4: vacation_row division guard when expected_per_day == 0.0 ──────────
+//
+// vacation_row is a view function (fn(&EasyHarvest) -> Element) that requires
+// a full Iced runtime and cannot be called in unit tests.  The state-level
+// guard (recompute_vacation_summary uses `if expected_per_day > 0.0 { … }`) is
+// already exercised by `vacation_summary_zero_epd_no_nan` above.  The per-row
+// guard in vacation_view.rs is verified by code inspection.
+// Spec reference: docs/superpowers/specs — 06-ui.md F4.

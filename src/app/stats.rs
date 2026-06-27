@@ -113,22 +113,21 @@ impl EasyHarvest {
                             .unwrap_or(true);
                         if year < Local::now().naive_local().date().year() && after_employment {
                             let next = year + 1;
-                            if !self.settings.carryover.contains_key(&next) {
-                                if let (Some(bal), Some(hols)) =
+                            if !self.settings.carryover.contains_key(&next)
+                                && let (Some(bal), Some(hols)) =
                                     (&self.year_balance, &self.holiday_stats)
-                                {
-                                    let epd = self.settings.expected_hours_per_day();
-                                    self.settings.carryover.insert(
-                                        next,
-                                        crate::state::settings::YearCarryover {
-                                            overtime_hours: bal.total_balance,
-                                            holiday_hours: hols.days_remaining * epd,
-                                            ..Default::default()
-                                        },
-                                    );
-                                    if let Err(e) = self.settings.save() {
-                                        self.error_banner = Some(format!("Failed to save settings: {e}"));
-                                    }
+                            {
+                                let epd = self.settings.expected_hours_per_day();
+                                self.settings.carryover.insert(
+                                    next,
+                                    crate::state::settings::YearCarryover {
+                                        overtime_hours: bal.total_balance,
+                                        holiday_hours: hols.days_remaining * epd,
+                                        ..Default::default()
+                                    },
+                                );
+                                if let Err(e) = self.settings.save() {
+                                    self.error_banner = Some(format!("Failed to save settings: {e}"));
                                 }
                             }
                         }

@@ -883,8 +883,13 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
     } else {
         "Add Entry"
     };
-    let submit_btn = primary_btn_lg(submit_label)
-        .on_press(Message::Entry(Box::new(EntryMsg::Submit)));
+    // M6-F3: omit on_press while a request is in flight — disables the button
+    // and prevents double-submit (same guard as VacationForm::submitting).
+    let submit_btn: iced::widget::Button<'_, Message> = if form.submitting {
+        primary_btn_lg(submit_label) // no on_press → disabled
+    } else {
+        primary_btn_lg(submit_label).on_press(Message::Entry(Box::new(EntryMsg::Submit)))
+    };
 
     let cancel_btn = ghost_btn_lg("Cancel")
         .on_press(Message::Entry(Box::new(EntryMsg::CancelForm)));

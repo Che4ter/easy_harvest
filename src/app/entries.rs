@@ -14,6 +14,9 @@ pub struct EntryForm {
     pub hours_input: String,
     pub notes_input: String,
     pub error: Option<String>,
+    /// True while an API create/update request is in flight — disables the
+    /// submit button to prevent double-submit (M6-F3).
+    pub submitting: bool,
 }
 
 impl EntryForm {
@@ -26,6 +29,7 @@ impl EntryForm {
             hours_input: String::new(),
             notes_input: String::new(),
             error: None,
+            submitting: false,
         }
     }
 
@@ -50,6 +54,7 @@ impl EntryForm {
             hours_input: crate::ui::format_hhmm(entry.hours),
             notes_input: entry.notes.clone().unwrap_or_default(),
             error: None,
+            submitting: false,
         }
     }
 }
@@ -235,6 +240,10 @@ impl EasyHarvest {
                     return Task::none();
                 };
 
+                // M6-F3: mark the form as submitting before the async call so the
+                // view can disable the submit button and prevent double-submit.
+                if let Some(f) = &mut self.entry_form { f.submitting = true; }
+
                 // Record usage in favorites
                 self.favorites.record_use(opt.project_id, opt.task_id);
                 if let Err(e) = self.favorites.save(&self.settings.data_dir) {
@@ -286,7 +295,9 @@ impl EasyHarvest {
                         self.entry_form = None;
                     }
                     Err(e) => {
+                        // M6-F3: clear submitting flag so the user can retry.
                         if let Some(f) = &mut self.entry_form {
+                            f.submitting = false;
                             f.error = Some(e);
                         }
                     }
@@ -305,7 +316,9 @@ impl EasyHarvest {
                         self.entry_form = None;
                     }
                     Err(e) => {
+                        // M6-F3: clear submitting flag so the user can retry.
                         if let Some(f) = &mut self.entry_form {
+                            f.submitting = false;
                             f.error = Some(e);
                         }
                     }

@@ -338,7 +338,7 @@ fn carryover_section(state: &EasyHarvest) -> Element<'_, Message> {
     // Collect existing entries sorted by year descending
     let mut entries: Vec<(i32, &crate::state::settings::YearCarryover)> =
         state.settings.carryover.iter().map(|(y, c)| (*y, c)).collect();
-    entries.sort_by(|a, b| b.0.cmp(&a.0));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.0));
 
     let rows: Vec<Element<Message>> = entries
         .iter()

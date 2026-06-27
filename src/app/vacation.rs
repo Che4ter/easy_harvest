@@ -219,23 +219,9 @@ impl EasyHarvest {
                             return Task::none();
                         };
                         // M5-F1: when a holiday task is assigned to more than one
-                        // project (e.g. a billable project AND an internal project),
-                        // prefer the assignment where that task is explicitly marked
-                        // non-billable so vacation entries don't appear on a client
-                        // invoice.  Fall back to the first matching project when all
-                        // are billable (preserving original first-match semantics).
-                        //
-                        // NOTE: max_by_key was intentionally avoided here because it
-                        // returns the *last* element among equal-scoring candidates,
-                        // which would silently change the project when all are billable.
-                        let candidates: Vec<_> = self.assignments.iter()
-                            .filter(|a| a.task_assignments.iter().any(|t| t.task.id == task_id))
-                            .collect();
-                        let project_id = candidates.iter()
-                            .find(|a| a.task_assignments.iter()
-                                .any(|t| t.task.id == task_id && !t.billable.unwrap_or(true)))
-                            .or_else(|| candidates.first())
-                            .map(|a| a.project.id);
+                        // project, prefer the non-billable one via the extracted
+                        // helper so the selection logic is unit-testable.
+                        let project_id = select_holiday_project_id(&self.assignments, task_id);
                         let Some(project_id) = project_id else {
                             form.error = Some("Could not find project for holiday task. Try syncing assignments.".into());
                             return Task::none();
@@ -315,4 +301,32 @@ impl EasyHarvest {
             }
         }
     }
+}
+
+// ── Pure helpers (extracted for unit-testability) ────────────────────────────
+
+/// M5-F1: Given `assignments`, return the project id for `task_id` that
+/// prefers a non-billable task assignment.  Falls back to the first matching
+/// project when all are billable (preserving original first-match semantics).
+///
+/// NOTE: `max_by_key` was intentionally avoided because it returns the *last*
+/// element among equal-scoring candidates, which would silently change the
+/// project when all are billable.
+pub(super) fn select_holiday_project_id(
+    assignments: &[crate::harvest::models::ProjectAssignment],
+    task_id: i64,
+) -> Option<i64> {
+    let candidates: Vec<_> = assignments
+        .iter()
+        .filter(|a| a.task_assignments.iter().any(|t| t.task.id == task_id))
+        .collect();
+    candidates
+        .iter()
+        .find(|a| {
+            a.task_assignments
+                .iter()
+                .any(|t| t.task.id == task_id && !t.billable.unwrap_or(true))
+        })
+        .or_else(|| candidates.first())
+        .map(|a| a.project.id)
 }
