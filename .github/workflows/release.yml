@@ -128,6 +128,11 @@ jobs:
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: ${{ matrix.asset }}
+          # Tag suffix is the single source of truth: a tag containing '-'
+          # (e.g. v1.6.0-beta.1) is published as a prerelease. This mirrors the
+          # app's parse_semver, which ignores such tags, so CI and the in-app
+          # update check stay in lock-step.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           # Only the Linux job generates release notes; the other two jobs just
           # upload their assets to the same release without overwriting the body.
           generate_release_notes: ${{ matrix.name == 'Linux x86_64' }}
