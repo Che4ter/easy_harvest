@@ -8,3 +8,4 @@
 # Credentials — never commit these
 api.txt
 *.token
+.tokensave
