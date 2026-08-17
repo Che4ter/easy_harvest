@@ -93,7 +93,8 @@ pub enum EntryMsg {
     TimerStarted(Result<TimeEntry, String>),
     TimerStopped(Result<TimeEntry, String>),
     TemplateApply(usize),
-    /// Fill the hours field with the remaining unbooked worked time.
+    /// Fill the hours field with the remaining unbooked worked time, i.e.
+    /// the gap between the work-day timer and what's already booked today.
     FillRemaining,
 }
 
@@ -429,11 +430,6 @@ impl EasyHarvest {
                     return Task::none();
                 }
                 let booked: f64 = self.entries.iter().map(|e| e.hours).sum();
-                let worked_h = self
-                    .work_day_store
-                    .get_or_default(self.current_date)
-                    .worked_hours(chrono::Local::now().naive_local().time());
-                let target = worked_h.max(self.settings.expected_hours_per_day());
                 // If editing an existing entry, exclude its hours from booked so
                 // the fill amount is the true gap, not double-counting.
                 let editing_hours = self
@@ -443,7 +439,15 @@ impl EasyHarvest {
                     .and_then(|id| self.entries.iter().find(|e| e.id == id))
                     .map(|e| e.hours)
                     .unwrap_or(0.0);
-                let remaining = (target - (booked - editing_hours)).max(0.0);
+                // Target the work-day timer's clocked hours, not the expected
+                // daily-hours setting — bookings should end up matching what
+                // the timer actually recorded, whether that's under or over
+                // the configured daily target.
+                let now = chrono::Local::now().naive_local().time();
+                let remaining = self
+                    .work_day_store
+                    .get_or_default(self.current_date)
+                    .unbooked_hours(booked - editing_hours, now);
                 let total_mins = (remaining * 60.0).round() as u32;
                 let h = total_mins / 60;
                 let m = total_mins % 60;

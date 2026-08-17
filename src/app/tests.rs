@@ -1181,6 +1181,35 @@ fn entry_form_submitting_cleared_on_updated_error() {
     assert!(f.error.is_some());
 }
 
+// ── FillRemaining targets worked time, not the expected daily-hours setting ──
+
+/// Regression test: FillRemaining must propose the gap between the work-day
+/// timer's clocked hours and what's booked, not `max(worked, expected)`.
+/// The latter meant that early in the day — before worked hours reached the
+/// expected daily target — Fill proposed the full daily target instead of
+/// actual worked time, leading to overbooking.
+#[test]
+fn fill_remaining_targets_worked_time_not_expected_daily_hours() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+
+    // Default settings (41h/week, 100%) give an 8.2h expected daily target,
+    // comfortably larger than the ~1h17m worked so far.
+    assert!((app.settings.expected_hours_per_day() - 8.2).abs() < 1e-9);
+
+    let now = chrono::Local::now().naive_local().time();
+    let mut work_day = crate::state::work_day::WorkDay::new(app.current_date);
+    work_day.start(now - chrono::Duration::minutes(77));
+    app.work_day_store.set(work_day);
+
+    app.entry_form = Some(EntryForm::new());
+    let _ = app.update_entries(EntryMsg::FillRemaining);
+
+    let hours_input = app.entry_form.as_ref().unwrap().hours_input.clone();
+    assert_eq!(hours_input, "1:17",
+        "Fill must propose the worked time (1:17), not the larger expected daily target (8:12)");
+}
+
 // ── M6-F4: vacation_row division guard when expected_per_day == 0.0 ──────────
 //
 // vacation_row is a view function (fn(&EasyHarvest) -> Element) that requires

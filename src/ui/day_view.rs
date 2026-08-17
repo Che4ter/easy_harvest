@@ -813,12 +813,12 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
         .and_then(|id| state.entries.iter().find(|e| e.id == id))
         .map(|e| e.hours)
         .unwrap_or(0.0);
-    let worked_h_now = state
+    // Target the work-day timer's clocked hours — matches EntryMsg::FillRemaining
+    // so the button label reflects what pressing it does.
+    let fill_remaining = state
         .work_day_store
         .get_or_default(state.current_date)
-        .worked_hours(Local::now().naive_local().time());
-    let fill_target = worked_h_now.max(state.cached_expected_hours);
-    let fill_remaining = (fill_target - (booked_total - editing_hours)).max(0.0);
+        .unbooked_hours(booked_total - editing_hours, Local::now().naive_local().time());
 
     let hours_label: Element<Message> = if fill_remaining > 0.01 {
         {
