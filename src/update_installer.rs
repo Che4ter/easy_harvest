@@ -54,6 +54,73 @@ pub fn verify_checksum(bytes: &[u8], expected_hex: &str) -> bool {
     actual.eq_ignore_ascii_case(expected_hex.trim())
 }
 
+// ── Download ──────────────────────────────────────────────────────────────────
+
+async fn http_get(url: &str) -> Result<reqwest::Response, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .get(url)
+        .header("User-Agent", concat!("easy-harvest/", env!("CARGO_PKG_VERSION")))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("request to {url} failed: HTTP {}", resp.status()));
+    }
+    Ok(resp)
+}
+
+pub async fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
+    let resp = http_get(url).await?;
+    resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+}
+
+pub async fn download_checksum(url: &str) -> Result<String, String> {
+    let resp = http_get(url).await?;
+    resp.text().await.map_err(|e| e.to_string())
+}
+
+// ── Install + relaunch ───────────────────────────────────────────────────────
+
+/// Distinguishes failures before the binary was replaced (safe to retry the
+/// whole download) from failures after it was already replaced (retrying a
+/// download would be pointless — the new binary is already in place).
+#[derive(Debug, Clone)]
+pub enum InstallError {
+    ReplaceFailed(String),
+    RelaunchFailed(String),
+}
+
+/// Write `bytes` to a temp file next to the running executable, swap it into
+/// place via `self_replace`, then spawn a new process from the (now-updated)
+/// executable path. `self_replace` preserves the running exe's permission
+/// bits onto the replacement itself, so no manual chmod is needed here; it
+/// also copies from (rather than consumes) the temp file, so it must be
+/// cleaned up here regardless of whether the replace succeeded.
+pub fn install_and_relaunch(bytes: &[u8]) -> Result<(), InstallError> {
+    let current_exe = std::env::current_exe()
+        .map_err(|e| InstallError::ReplaceFailed(e.to_string()))?;
+    let dir = current_exe
+        .parent()
+        .ok_or_else(|| InstallError::ReplaceFailed("executable has no parent directory".to_string()))?;
+    let tmp_path = dir.join(format!(".easy_harvest-update-{}.tmp", std::process::id()));
+
+    std::fs::write(&tmp_path, bytes).map_err(|e| InstallError::ReplaceFailed(e.to_string()))?;
+
+    let replace_result = self_replace::self_replace(&tmp_path)
+        .map_err(|e| InstallError::ReplaceFailed(e.to_string()));
+    let _ = std::fs::remove_file(&tmp_path);
+    replace_result?;
+
+    std::process::Command::new(&current_exe)
+        .spawn()
+        .map_err(|e| InstallError::RelaunchFailed(e.to_string()))?;
+    Ok(())
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
