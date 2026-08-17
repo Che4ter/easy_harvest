@@ -159,17 +159,11 @@ impl HarvestClient {
         from: &str,
         to: &str,
     ) -> Result<Vec<TimeEntry>, HarvestError> {
-        let mut all_entries = Vec::new();
-        let mut page = 1;
-        loop {
+        paginate_all(|page| async move {
             let resp = self.list_time_entries(user_id, Some(from), Some(to), Some(page)).await?;
-            all_entries.extend(resp.time_entries);
-            if page >= resp.total_pages {
-                break;
-            }
-            page += 1;
-        }
-        Ok(all_entries)
+            Ok((resp.time_entries, resp.total_pages))
+        })
+        .await
     }
 
     pub async fn create_time_entry(
@@ -252,18 +246,37 @@ impl HarvestClient {
     pub async fn list_all_my_project_assignments(
         &self,
     ) -> Result<Vec<ProjectAssignment>, HarvestError> {
-        let mut all = Vec::new();
-        let mut page = 1;
-        loop {
+        paginate_all(|page| async move {
             let resp = self.list_my_project_assignments(Some(page)).await?;
-            all.extend(resp.project_assignments);
-            if page >= resp.total_pages {
-                break;
-            }
-            page += 1;
-        }
-        Ok(all)
+            Ok((resp.project_assignments, resp.total_pages))
+        })
+        .await
     }
+}
+
+/// Drive a Harvest paginated list endpoint to completion.
+///
+/// `fetch_page` is called with 1-based page numbers and must return the
+/// page's items along with the total page count reported by the API;
+/// shared by every `list_all_*` method so the "loop until `page >=
+/// total_pages`" logic exists in exactly one place.
+async fn paginate_all<T, Fut>(
+    mut fetch_page: impl FnMut(i64) -> Fut,
+) -> Result<Vec<T>, HarvestError>
+where
+    Fut: std::future::Future<Output = Result<(Vec<T>, i64), HarvestError>>,
+{
+    let mut all = Vec::new();
+    let mut page = 1;
+    loop {
+        let (items, total_pages) = fetch_page(page).await?;
+        all.extend(items);
+        if page >= total_pages {
+            break;
+        }
+        page += 1;
+    }
+    Ok(all)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

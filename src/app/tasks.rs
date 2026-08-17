@@ -160,13 +160,7 @@ impl EasyHarvest {
         let year = self.overtime_year;
         let from = format!("{year}-01-01");
         let to = format!("{year}-12-31");
-        // For past years use Dec 31 as the balance end date so all year entries count.
-        let balance_end = if year < today.year() {
-            chrono::NaiveDate::from_ymd_opt(year, 12, 31).unwrap_or(today)
-        } else {
-            today
-        };
-        let balance_end_str = balance_end.format("%Y-%m-%d").to_string();
+        let balance_end = balance_end_for_year(year, today);
         let expected_per_day = self.settings.expected_hours_per_day();
         let public_holidays = swiss_public_holidays(year);
         let carryover = self.settings.overtime_carryover_for(year);
@@ -184,33 +178,20 @@ impl EasyHarvest {
                     .await
                     .map_err(|e| e.to_string())?;
 
-                // Balance only counts entries up to balance_end (today for current year,
-                // Dec 31 for past years); holiday stats need the full year.
-                let ytd_entries: Vec<_> = all_entries
-                    .iter()
-                    .filter(|e| e.spent_date.as_str() <= balance_end_str.as_str())
-                    .cloned()
-                    .collect();
-
                 // Use first_work_day as effective start when it falls in the target year so
                 // expected hours are not inflated by months the user wasn't employed yet.
                 let effective_start = first_work_day.filter(|d| d.year() == year);
-                let balance = year_to_date_balance(
-                    &ytd_entries,
+                let (balance, holidays) = year_balance_and_holidays(
+                    &all_entries,
                     year,
+                    balance_end,
                     effective_start,
                     expected_per_day,
                     &public_holidays,
                     carryover,
                     adj_total,
-                    balance_end,
-                );
-                let holidays = crate::stats::holiday_stats(
-                    &all_entries,
-                    year,
                     &holiday_task_ids,
                     total_holiday_days,
-                    expected_per_day,
                 );
                 // M1-F4: month summaries must use ytd_entries (≤ balance_end) so
                 // future entries in the current year don't inflate past-month
@@ -236,12 +217,10 @@ impl EasyHarvest {
         let Some(client) = self.client.clone() else {
             return Task::none();
         };
+        let today = Local::now().naive_local().date();
         let from = format!("{year}-01-01");
         let to = format!("{year}-12-31");
-        // Past years always use Dec 31 as the balance end.
-        let balance_end = chrono::NaiveDate::from_ymd_opt(year, 12, 31)
-            .expect("year is always valid");
-        let balance_end_str = balance_end.format("%Y-%m-%d").to_string();
+        let balance_end = balance_end_for_year(year, today);
         let expected_per_day = self.settings.expected_hours_per_day();
         let public_holidays = swiss_public_holidays(year);
         let carryover = self.settings.overtime_carryover_for(year);
@@ -258,29 +237,18 @@ impl EasyHarvest {
                     .await
                     .map_err(|e| e.to_string())?;
 
-                let ytd_entries: Vec<_> = all_entries
-                    .iter()
-                    .filter(|e| e.spent_date.as_str() <= balance_end_str.as_str())
-                    .cloned()
-                    .collect();
-
                 let effective_start = first_work_day.filter(|d| d.year() == year);
-                let balance = year_to_date_balance(
-                    &ytd_entries,
+                let (balance, holidays) = year_balance_and_holidays(
+                    &all_entries,
                     year,
+                    balance_end,
                     effective_start,
                     expected_per_day,
                     &public_holidays,
                     carryover,
                     adj_total,
-                    balance_end,
-                );
-                let holidays = crate::stats::holiday_stats(
-                    &all_entries,
-                    year,
                     &holiday_task_ids,
                     total_holiday_days,
-                    expected_per_day,
                 );
                 Ok((balance, holidays))
             },
@@ -387,7 +355,19 @@ impl EasyHarvest {
     #[cfg(not(target_os = "macos"))]
     pub(super) fn sync_tray_phase(&self) {
         let today = Local::now().naive_local().date();
-        let day = self.work_day_store.get_or_default(today);
+        // work_day_store is scoped to whatever month the Day view's
+        // current_date is showing, which may not be today's month (e.g.
+        // the user browsed to a different month). Load today's month
+        // directly in that case so the tray reflects the actual
+        // in-progress work day instead of falling back to "Not started".
+        let day = if self.work_day_store.year == today.year()
+            && self.work_day_store.month == today.month()
+        {
+            self.work_day_store.get_or_default(today)
+        } else {
+            WorkDayStore::load(&self.settings.data_dir, today.year(), today.month())
+                .get_or_default(today)
+        };
         if let Ok(mut lock) = self.tray_phase.lock() {
             *lock = day.phase();
         }
@@ -508,11 +488,7 @@ impl EasyHarvest {
 
         let from = format!("{year}-01-01");
         let today = Local::now().naive_local().date();
-        let to = if year < today.year() {
-            format!("{year}-12-31")
-        } else {
-            today.format("%Y-%m-%d").to_string()
-        };
+        let to = balance_end_for_year(year, today).format("%Y-%m-%d").to_string();
 
         // Collect all project IDs from this year's budgets.
         let all_project_ids: std::collections::HashSet<i64> = self
@@ -623,6 +599,63 @@ pub(super) fn build_vacation_entries(
     Ok(entries)
 }
 
+/// The last date entries count toward `year`'s balance: `today` for the
+/// current year, since only its elapsed portion has happened, and Dec 31
+/// for any other year — a past year is fully elapsed, and a future year
+/// hasn't started yet so there is no partial "elapsed portion" to clamp to
+/// (using `today`, which isn't even in that year, would wrongly exclude
+/// every entry booked in it, e.g. pre-booked future vacation).
+pub(super) fn balance_end_for_year(year: i32, today: chrono::NaiveDate) -> chrono::NaiveDate {
+    if year == today.year() {
+        today
+    } else {
+        chrono::NaiveDate::from_ymd_opt(year, 12, 31).unwrap_or(today)
+    }
+}
+
+/// Shared YTD balance + holiday-stats computation used by both the current
+/// year's stats page (`load_stats_task`) and the background carryover-sync
+/// task (`load_carryover_sync_task`), which had drifted into two
+/// independently-maintained copies of the same calculation.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn year_balance_and_holidays(
+    all_entries: &[crate::harvest::models::TimeEntry],
+    year: i32,
+    balance_end: chrono::NaiveDate,
+    effective_start: Option<chrono::NaiveDate>,
+    expected_per_day: f64,
+    public_holidays: &[crate::state::settings::PublicHoliday],
+    carryover: f64,
+    adj_total: f64,
+    holiday_task_ids: &[i64],
+    total_holiday_days: f64,
+) -> (crate::stats::YearBalance, crate::stats::HolidayStats) {
+    let balance_end_str = balance_end.format("%Y-%m-%d").to_string();
+    let ytd_entries: Vec<_> = all_entries
+        .iter()
+        .filter(|e| e.spent_date.as_str() <= balance_end_str.as_str())
+        .cloned()
+        .collect();
+    let balance = year_to_date_balance(
+        &ytd_entries,
+        year,
+        effective_start,
+        expected_per_day,
+        public_holidays,
+        carryover,
+        adj_total,
+        balance_end,
+    );
+    let holidays = crate::stats::holiday_stats(
+        all_entries,
+        year,
+        holiday_task_ids,
+        total_holiday_days,
+        expected_per_day,
+    );
+    (balance, holidays)
+}
+
 /// M1-F4: Compute month summaries using only entries up to `balance_end`
 /// (YTD-capped view).  The caller may pass the full `all_entries` slice;
 /// this function applies the `≤ balance_end` filter internally so that
@@ -652,20 +685,4 @@ pub(super) fn month_summaries_ytd(
         public_holidays,
         balance_end,
     )
-}
-
-pub(super) fn format_harvest_error(e: HarvestError) -> String {
-    match e {
-        HarvestError::Api { status, body } => {
-            format!("API error {status}: {body}")
-        }
-        HarvestError::Http(e) => format!("Network error: {e}"),
-        HarvestError::RateLimited { retry_after_secs } => {
-            format!("Rate limited — retry after {retry_after_secs}s")
-        }
-        HarvestError::Unauthorized => {
-            "Authentication failed. Please check your API token and Account ID.".into()
-        }
-        HarvestError::InvalidHeader(e) => format!("Invalid header value: {e}"),
-    }
 }

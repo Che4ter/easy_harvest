@@ -1,5 +1,4 @@
 use super::*;
-use super::tasks::format_harvest_error;
 
 /// Format an f64 for display in numeric fields: one decimal, trailing zeros stripped.
 fn fmt_hours(v: f64) -> String {
@@ -291,7 +290,7 @@ impl EasyHarvest {
                             .get_current_user()
                             .await
                             .map(|u| format!("{} {}", u.first_name, u.last_name))
-                            .map_err(format_harvest_error)
+                            .map_err(|e| e.to_string())
                     },
                     |result| Message::Settings(SettingsMsg::Connected(result)),
                 )

@@ -256,11 +256,21 @@ impl EasyHarvest {
                         self.vacation.form = None;
                         // Only apply entries that match the currently displayed year;
                         // discard stale results that arrived after a year navigation.
+                        // Also drop any entry whose id we already have: if a
+                        // year-navigation reload completed while this submission
+                        // was still in flight, `self.vacation.entries` may already
+                        // contain these same server-created entries, and applying
+                        // them again would duplicate them in the UI.
                         let current_year = self.vacation.year;
                         let year_prefix = format!("{}-", current_year);
+                        let existing_ids: std::collections::HashSet<i64> =
+                            self.vacation.entries.iter().map(|e| e.id).collect();
                         let matching: Vec<_> = new_entries
                             .into_iter()
-                            .filter(|e| e.spent_date.starts_with(&year_prefix))
+                            .filter(|e| {
+                                e.spent_date.starts_with(&year_prefix)
+                                    && !existing_ids.contains(&e.id)
+                            })
                             .collect();
                         if !matching.is_empty() {
                             self.vacation.entries.extend(matching);

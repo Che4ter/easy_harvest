@@ -26,6 +26,12 @@ pub struct WorkDayStore {
     pub year: i32,
     pub month: u32,
     days: BTreeMap<NaiveDate, WorkDay>,
+    /// Set when the last load hit a real read error (not just "file
+    /// missing") — e.g. an OneDrive sharing-violation lock on a file that
+    /// exists and is intact. `save` refuses to write while this is set, so
+    /// a transient read glitch can never silently overwrite this month's
+    /// real data with an empty store.
+    load_failed: bool,
 }
 
 impl WorkDayStore {
@@ -35,18 +41,40 @@ impl WorkDayStore {
             .join(format!("{year}-{month:02}.json"))
     }
 
-    /// Load the month's store from disk.  Returns an empty store on any error
-    /// (missing file, parse failure) so the caller never needs to handle a
-    /// cold-start case specially.
+    /// Load the month's store from disk.  Returns an empty store when the
+    /// file doesn't exist yet or is corrupt, so the caller never needs to
+    /// handle a cold-start case specially. A real read error (as opposed to
+    /// "file missing") instead marks the store so [`Self::save`] refuses to
+    /// write, rather than risk overwriting real data with this incomplete
+    /// in-memory copy.
     pub fn load(data_dir: &Path, year: i32, month: u32) -> Self {
         let path = Self::path(data_dir, year, month);
-        let days: BTreeMap<NaiveDate, WorkDay> =
-            super::io::load_json(&path).unwrap_or_default();
-        Self { year, month, days }
+        let (days, load_failed) = match super::io::load_json_checked(&path) {
+            Ok(days) => (days.unwrap_or_default(), false),
+            Err(e) => {
+                eprintln!(
+                    "Warning: failed to read {}: {e} — refusing to save this month until it can be read again",
+                    path.display()
+                );
+                (BTreeMap::new(), true)
+            }
+        };
+        Self { year, month, days, load_failed }
     }
 
     /// Persist the store to disk (creates parent directories as needed).
+    ///
+    /// Returns an error without writing if the load that produced this
+    /// store failed to read the existing file (see [`Self::load`]) —
+    /// writing here would permanently replace the real, unread file with
+    /// this store's incomplete in-memory contents.
     pub fn save(&self, data_dir: &Path) -> Result<(), std::io::Error> {
+        if self.load_failed {
+            return Err(std::io::Error::other(format!(
+                "not saving {}-{:02}: the existing file could not be read earlier in this session",
+                self.year, self.month
+            )));
+        }
         let path = Self::path(data_dir, self.year, self.month);
         std::fs::create_dir_all(path.parent().expect("path has parent"))?;
         let json = serde_json::to_string_pretty(&self.days)

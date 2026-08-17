@@ -62,19 +62,19 @@ impl EasyHarvest {
                 match result {
                     Ok(id) => {
                         self.harvest_user_id = Some(id);
-                        // Now that the user ID is known, kick off all pending
-                        // data loads so every request is properly filtered.
-                        self.loading = true;
-                        self.entries_gen += 1;
-                        self.assignments_gen += 1;
+                        // Now that the user ID is known, (re-)dispatch the load
+                        // for whichever page is currently active — this covers
+                        // both the startup load (initial page is always Day)
+                        // and any page the user navigated to while this fetch
+                        // was still in flight (see the PageChanged deferral).
                         Task::batch([
-                            self.load_entries_task(),
-                            self.load_assignments_task(),
+                            self.dispatch_page_load(&self.page.clone()),
                             // Background: compute any missing carryover entries.
                             self.update_settings(SettingsMsg::CarryoverSyncStart),
                         ])
                     }
                     Err(e) => {
+                        self.loading = false;
                         self.error_banner = Some(format!("Could not load user profile: {e}"));
                         Task::none()
                     }
@@ -159,6 +159,62 @@ impl EasyHarvest {
 
     // ── Navigation / Date ────────────────────────────────────────────────────
 
+    /// Fire the background load task appropriate for `page`, bumping that
+    /// page's generation counter so stale in-flight responses are discarded.
+    /// Callers must ensure `self.harvest_user_id` has resolved whenever
+    /// `self.client.is_some()`, so manager-role accounts never fetch
+    /// unfiltered time entries.
+    fn dispatch_page_load(&mut self, page: &Page) -> Task<Message> {
+        match page {
+            Page::Day => {
+                self.loading = true;
+                self.entries_gen += 1;
+                self.assignments_gen += 1;
+                Task::batch([
+                    self.load_entries_task(),
+                    self.load_assignments_task(),
+                ])
+            }
+            Page::Stats => {
+                self.loading = true;
+                self.stats_gen += 1;
+                self.load_stats_task()
+            }
+            Page::Settings => Task::none(),
+            Page::Vacation => {
+                if self.vacation.entries.is_empty() && self.client.is_some() {
+                    self.loading = true;
+                    self.vacation_gen += 1;
+                    self.load_vacation_task()
+                } else {
+                    Task::none()
+                }
+            }
+            Page::Billable => {
+                if self.billable.entries.is_empty() && self.client.is_some() {
+                    self.loading = true;
+                    self.billable_gen += 1;
+                    self.load_billable_task()
+                } else {
+                    Task::none()
+                }
+            }
+            Page::ProjectTracking => {
+                let year = self.project_tracking.year;
+                if self.project_tracking.entries.is_empty()
+                    && self.client.is_some()
+                    && !self.project_tracking.budgets.budgets_for(year).is_empty()
+                {
+                    self.loading = true;
+                    self.project_tracking_gen += 1;
+                    self.load_project_tracking_task()
+                } else {
+                    Task::none()
+                }
+            }
+        }
+    }
+
     fn update_navigation(&mut self, msg: NavMsg) -> Task<Message> {
         match msg {
             NavMsg::PageChanged(page) => {
@@ -173,65 +229,30 @@ impl EasyHarvest {
                 }
                 self.entry_form = None;
                 self.error_banner = None;
-                let task = match &page {
-                    Page::Day => {
-                        self.loading = true;
-                        self.entries_gen += 1;
-                        self.assignments_gen += 1;
-                        Task::batch([
-                            self.load_entries_task(),
-                            self.load_assignments_task(),
-                        ])
-                    }
-                    Page::Stats => {
-                        self.loading = true;
-                        self.stats_gen += 1;
-                        self.load_stats_task()
-                    }
-                    Page::Settings => {
-                        // Refresh profile inputs from current settings
-                        self.settings_form.weekly_hours_input = self.settings.total_weekly_hours.to_string();
-                        self.settings_form.percentage_input = format!("{:.1}", self.settings.work_percentage * 100.0);
-                        self.settings_form.holidays_input = self.settings.total_holiday_days_per_year.to_string();
-                        self.settings_form.first_work_day_input = self.settings.first_work_day
-                            .map(|d| d.format("%d.%m.%Y").to_string())
-                            .unwrap_or_default();
-                        self.settings_form.profile_saved = false;
-                        self.settings_form.data_dir_input = self.settings.data_dir.display().to_string();
-                        self.settings_form.data_dir_saved = false;
-                        Task::none()
-                    }
-                    Page::Vacation => {
-                        if self.vacation.entries.is_empty() && self.client.is_some() {
-                            self.loading = true;
-                            self.vacation_gen += 1;
-                            self.load_vacation_task()
-                        } else {
-                            Task::none()
-                        }
-                    }
-                    Page::Billable => {
-                        if self.billable.entries.is_empty() && self.client.is_some() {
-                            self.loading = true;
-                            self.billable_gen += 1;
-                            self.load_billable_task()
-                        } else {
-                            Task::none()
-                        }
-                    }
-                    Page::ProjectTracking => {
-                        let year = self.project_tracking.year;
-                        if self.project_tracking.entries.is_empty()
-                            && self.client.is_some()
-                            && !self.project_tracking.budgets.budgets_for(year).is_empty()
-                        {
-                            self.loading = true;
-                            self.project_tracking_gen += 1;
-                            self.load_project_tracking_task()
-                        } else {
-                            Task::none()
-                        }
-                    }
+                let task = if page == Page::Settings {
+                    // Refresh profile inputs from current settings
+                    self.settings_form.weekly_hours_input = self.settings.total_weekly_hours.to_string();
+                    self.settings_form.percentage_input = format!("{:.1}", self.settings.work_percentage * 100.0);
+                    self.settings_form.holidays_input = self.settings.total_holiday_days_per_year.to_string();
+                    self.settings_form.first_work_day_input = self.settings.first_work_day
+                        .map(|d| d.format("%d.%m.%Y").to_string())
+                        .unwrap_or_default();
+                    self.settings_form.profile_saved = false;
+                    self.settings_form.data_dir_input = self.settings.data_dir.display().to_string();
+                    self.settings_form.data_dir_saved = false;
+                    Task::none()
+                } else if self.client.is_some() && self.harvest_user_id.is_none() {
+                    // The current-user fetch hasn't resolved yet. Firing this
+                    // page's load now would call list_all_time_entries without
+                    // a user id, which for manager-role Harvest accounts
+                    // returns every managed user's entries instead of just
+                    // the current user's. Defer: CurrentUserLoaded's Ok arm
+                    // re-dispatches the load for whatever page is active once
+                    // the id is known.
+                    self.loading = true;
+                    self.load_current_user_task()
+                } else {
+                    self.dispatch_page_load(&page)
                 };
                 self.page = page;
                 task

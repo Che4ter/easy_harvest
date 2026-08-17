@@ -5,7 +5,7 @@ use iced::{
     self, font, keyboard, window, Color, Element, Font, Subscription, Task, Theme,
 };
 
-use crate::harvest::client::{HarvestClient, HarvestError};
+use crate::harvest::client::HarvestClient;
 use crate::harvest::models::{CreateTimeEntry, ProjectAssignment, TimeEntry, UpdateTimeEntry};
 use crate::state::cache::ProjectCache;
 use crate::state::favorites::{Favorites, ProjectOption};
