@@ -9,9 +9,9 @@ pub struct UpdateAssets {
 }
 
 fn platform_asset_name() -> Option<&'static str> {
-    if cfg!(target_os = "linux") {
+    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         Some("easy_harvest-linux-x86_64")
-    } else if cfg!(target_os = "windows") {
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         Some("easy_harvest-windows-x86_64.exe")
     } else {
         None
@@ -56,9 +56,9 @@ pub fn verify_checksum(bytes: &[u8], expected_hex: &str) -> bool {
 
 // ── Download ──────────────────────────────────────────────────────────────────
 
-async fn http_get(url: &str) -> Result<reqwest::Response, String> {
+async fn http_get(url: &str, timeout_secs: u64) -> Result<reqwest::Response, String> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
         .build()
         .map_err(|e| e.to_string())?;
     let resp = client
@@ -74,12 +74,12 @@ async fn http_get(url: &str) -> Result<reqwest::Response, String> {
 }
 
 pub async fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
-    let resp = http_get(url).await?;
+    let resp = http_get(url, 300).await?;
     resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
 }
 
 pub async fn download_checksum(url: &str) -> Result<String, String> {
-    let resp = http_get(url).await?;
+    let resp = http_get(url, 30).await?;
     resp.text().await.map_err(|e| e.to_string())
 }
 

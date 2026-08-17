@@ -147,10 +147,6 @@ fn update_banner(state: &UpdateState) -> Option<Element<'_, Message>> {
             "Downloading update…".to_string(),
             Some(update_button_el("Downloading…", None)),
         ),
-        UpdateState::Verifying { .. } => (
-            "Verifying update…".to_string(),
-            Some(update_button_el("Verifying…", None)),
-        ),
         UpdateState::Installing { .. } => (
             "Installing update…".to_string(),
             Some(update_button_el("Installing…", None)),

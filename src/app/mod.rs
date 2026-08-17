@@ -172,7 +172,6 @@ pub enum UpdateState {
     /// a self-update binary (macOS) — banner shows the manual link only.
     Available { tag: String, assets: Option<UpdateAssets> },
     Downloading { assets: UpdateAssets },
-    Verifying { assets: UpdateAssets },
     Installing { assets: UpdateAssets },
     /// Download, verification, or install failed before the binary was
     /// replaced. The "Update now" button stays live to retry.

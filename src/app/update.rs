@@ -182,7 +182,6 @@ impl EasyHarvest {
                 };
                 match result {
                     Ok((bytes, expected_hex)) => {
-                        self.update_state = UpdateState::Verifying { assets: assets.clone() };
                         if !crate::update_installer::verify_checksum(&bytes, &expected_hex) {
                             self.update_state = UpdateState::Failed {
                                 reason: "Downloaded update failed verification — try again or download manually".into(),

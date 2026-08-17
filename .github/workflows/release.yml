@@ -138,7 +138,7 @@ jobs:
             git log "$PREV_TAG"..HEAD --pretty='format:- %s'
           else
             git log --pretty='format:- %s'
-          fi | grep -vi '^- bump version$' > release-notes.md
+          fi | { grep -vi '^- bump version$' || true; } > release-notes.md
 
       # ── Upload to the GitHub release created by the tag push ─────────────────
       - name: Upload to release
