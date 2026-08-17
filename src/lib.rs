@@ -6,3 +6,4 @@ pub mod stats;
 #[cfg(not(target_os = "macos"))]
 pub mod tray;
 pub mod ui;
+pub mod update_installer;
