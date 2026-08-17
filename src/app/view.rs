@@ -23,8 +23,8 @@ impl EasyHarvest {
             col = col.push(error_banner(err));
         }
 
-        if let Some(version) = &self.update_available {
-            col = col.push(update_banner(version));
+        if let Some(banner) = update_banner(&self.update_state) {
+            col = col.push(banner);
         }
 
         col = col.push(content);
@@ -134,7 +134,39 @@ fn error_banner(msg: &str) -> Element<'_, Message> {
     .into()
 }
 
-fn update_banner(version: &str) -> Element<'_, Message> {
+fn update_banner(state: &UpdateState) -> Option<Element<'_, Message>> {
+    let (status_text, update_button): (String, Option<Element<Message>>) = match state {
+        UpdateState::Idle => return None,
+        UpdateState::Available { tag, assets } => (
+            format!("Update available: {tag}"),
+            assets
+                .as_ref()
+                .map(|_| update_button_el("Update now", Some(Message::StartUpdate))),
+        ),
+        UpdateState::Downloading { .. } => (
+            "Downloading update…".to_string(),
+            Some(update_button_el("Downloading…", None)),
+        ),
+        UpdateState::Verifying { .. } => (
+            "Verifying update…".to_string(),
+            Some(update_button_el("Verifying…", None)),
+        ),
+        UpdateState::Installing { .. } => (
+            "Installing update…".to_string(),
+            Some(update_button_el("Installing…", None)),
+        ),
+        UpdateState::Failed { reason, .. } => (
+            format!("Update failed: {reason}"),
+            Some(update_button_el("Update now", Some(Message::StartUpdate))),
+        ),
+        UpdateState::InstalledNeedsManualRestart(reason) => (
+            format!(
+                "Update installed but couldn't restart automatically: {reason}. Please launch Easy Harvest manually."
+            ),
+            None,
+        ),
+    };
+
     let link = button(
         text("View release →")
             .font(FONT_MEDIUM)
@@ -152,22 +184,44 @@ fn update_banner(version: &str) -> Element<'_, Message> {
     .padding([4, 10])
     .on_press(Message::OpenReleases);
 
-    container(
-        row![
-            text(format!("Update available: {version}"))
-                .font(FONT_REGULAR)
-                .size(13)
-                .color(Color::WHITE),
-            Space::new().width(iced::Length::Fill),
-            link,
-        ]
-        .align_y(iced::Alignment::Center),
+    let mut actions = row![].spacing(8).align_y(iced::Alignment::Center);
+    if let Some(btn) = update_button {
+        actions = actions.push(btn);
+    }
+    actions = actions.push(link);
+
+    Some(
+        container(
+            row![
+                text(status_text).font(FONT_REGULAR).size(13).color(Color::WHITE),
+                Space::new().width(iced::Length::Fill),
+                actions,
+            ]
+            .align_y(iced::Alignment::Center),
+        )
+        .style(|_| container::Style {
+            background: Some(iced::Background::Color(ACCENT)),
+            ..Default::default()
+        })
+        .padding([6, 16])
+        .width(iced::Length::Fill)
+        .into(),
     )
-    .style(|_| container::Style {
-        background: Some(iced::Background::Color(ACCENT)),
-        ..Default::default()
-    })
-    .padding([6, 16])
-    .width(iced::Length::Fill)
-    .into()
+}
+
+fn update_button_el(label: &'static str, on_press: Option<Message>) -> Element<'static, Message> {
+    let btn = button(text(label).font(FONT_MEDIUM).size(13).color(ACCENT))
+        .style(|_, _| button::Style {
+            background: Some(iced::Background::Color(Color {
+                r: 1.0, g: 1.0, b: 1.0, a: 0.90,
+            })),
+            text_color: ACCENT,
+            border: iced::Border { radius: 4.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .padding([4, 10]);
+    match on_press {
+        Some(msg) => btn.on_press(msg).into(),
+        None => btn.into(),
+    }
 }
