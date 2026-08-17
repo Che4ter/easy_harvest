@@ -144,14 +144,92 @@ impl EasyHarvest {
                 }
             }
 
-            Message::UpdateCheckResult(tag) => {
-                self.update_available = tag;
+            Message::UpdateCheckResult(result) => {
+                self.update_state = match result {
+                    Some((tag, assets)) => UpdateState::Available { tag, assets },
+                    None => UpdateState::Idle,
+                };
                 Task::none()
             }
 
             Message::OpenReleases => {
                 let url = format!("{}/releases", env!("CARGO_PKG_REPOSITORY"));
                 let _ = open::that_detached(url);
+                Task::none()
+            }
+
+            Message::StartUpdate => {
+                let assets = match &self.update_state {
+                    UpdateState::Available { assets: Some(a), .. } => a.clone(),
+                    UpdateState::Failed { assets, .. } => assets.clone(),
+                    _ => return Task::none(),
+                };
+                self.update_state = UpdateState::Downloading { assets: assets.clone() };
+                Task::perform(
+                    async move {
+                        let bytes = crate::update_installer::download_bytes(&assets.binary_url).await?;
+                        let checksum = crate::update_installer::download_checksum(&assets.checksum_url).await?;
+                        Ok::<(Vec<u8>, String), String>((bytes, checksum))
+                    },
+                    Message::UpdateDownloaded,
+                )
+            }
+
+            Message::UpdateDownloaded(result) => {
+                let assets = match &self.update_state {
+                    UpdateState::Downloading { assets } => assets.clone(),
+                    _ => return Task::none(),
+                };
+                match result {
+                    Ok((bytes, expected_hex)) => {
+                        if !crate::update_installer::verify_checksum(&bytes, &expected_hex) {
+                            self.update_state = UpdateState::Failed {
+                                reason: "Downloaded update failed verification — try again or download manually".into(),
+                                assets,
+                            };
+                            return Task::none();
+                        }
+                        self.update_state = UpdateState::Installing { assets: assets.clone() };
+                        Task::perform(
+                            async move {
+                                tokio::task::spawn_blocking(move || {
+                                    crate::update_installer::install_and_relaunch(&bytes)
+                                })
+                                .await
+                                .unwrap_or_else(|e| {
+                                    // A JoinError means the blocking task panicked or was
+                                    // cancelled — we can't know whether the replace itself
+                                    // happened, so treat it as the retryable case (safe
+                                    // default: self_replace + our own file swap are both
+                                    // effectively idempotent to redo).
+                                    Err(crate::update_installer::InstallError::ReplaceFailed(e.to_string()))
+                                })
+                            },
+                            Message::UpdateInstalled,
+                        )
+                    }
+                    Err(reason) => {
+                        self.update_state = UpdateState::Failed { reason, assets };
+                        Task::none()
+                    }
+                }
+            }
+
+            Message::UpdateInstalled(Ok(())) => iced::exit(),
+            Message::UpdateInstalled(Err(InstallError::ReplaceFailed(reason))) => {
+                // The old binary is still intact — recover `assets` from the
+                // Installing state so "Update now" can retry the download.
+                let assets = match &self.update_state {
+                    UpdateState::Installing { assets } => assets.clone(),
+                    _ => return Task::none(),
+                };
+                self.update_state = UpdateState::Failed { reason, assets };
+                Task::none()
+            }
+            Message::UpdateInstalled(Err(InstallError::RelaunchFailed(reason))) => {
+                // The new binary is already in place; a "retry download" button
+                // would be wrong here, so this is a distinct, non-retryable state.
+                self.update_state = UpdateState::InstalledNeedsManualRestart(reason);
                 Task::none()
             }
         }

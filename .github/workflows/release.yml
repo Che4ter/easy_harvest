@@ -66,6 +66,8 @@ jobs:
       # Renovate / Dependabot can keep these up to date automatically.
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
         with:
@@ -110,12 +112,16 @@ jobs:
       # ── Package ─────────────────────────────────────────────────────────────
       - name: Package (Linux)
         if: runner.os == 'Linux'
-        run: cp target/release/easy_harvest ${{ matrix.asset }}
+        run: |
+          cp target/release/easy_harvest ${{ matrix.asset }}
+          sha256sum ${{ matrix.asset }} | cut -d' ' -f1 > ${{ matrix.asset }}.sha256
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Copy-Item target\release\easy_harvest.exe ${{ matrix.asset }}
+        run: |
+          Copy-Item target\release\easy_harvest.exe ${{ matrix.asset }}
+          (Get-FileHash ${{ matrix.asset }} -Algorithm SHA256).Hash.ToLower() | Out-File -NoNewline ${{ matrix.asset }}.sha256
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
@@ -123,16 +129,29 @@ jobs:
           cd "target/release/bundle/osx"
           zip -r "${{ github.workspace }}/${{ matrix.asset }}" "Easy Harvest.app"
 
+      # ── Generate release notes ──────────────────────────────────────────────────
+      - name: Generate release notes from commit log (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            git log "$PREV_TAG"..HEAD --pretty='format:- %s'
+          else
+            git log --pretty='format:- %s'
+          fi | { grep -vi '^- bump version$' || true; } > release-notes.md
+
       # ── Upload to the GitHub release created by the tag push ─────────────────
       - name: Upload to release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
-          files: ${{ matrix.asset }}
+          files: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256
           # Tag suffix is the single source of truth: a tag containing '-'
           # (e.g. v1.6.0-beta.1) is published as a prerelease. This mirrors the
           # app's parse_semver, which ignores such tags, so CI and the in-app
           # update check stay in lock-step.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          # Only the Linux job generates release notes; the other two jobs just
-          # upload their assets to the same release without overwriting the body.
-          generate_release_notes: ${{ matrix.name == 'Linux x86_64' }}
+          # Only the Linux job sets the release body; the other two jobs just
+          # upload their assets to the same release without overwriting it.
+          body_path: ${{ runner.os == 'Linux' && 'release-notes.md' || '' }}
