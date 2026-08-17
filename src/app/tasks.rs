@@ -20,7 +20,7 @@ fn parse_semver(v: &str) -> Option<(u32, u32, u32)> {
 
 impl EasyHarvest {
     /// Check GitHub releases for a newer version. Fires once on startup and
-    /// resolves to `Some(tag)` when a newer stable release is available, or
+    /// resolves to `Some((tag, assets))` when a newer stable release is available, or
     /// `None` otherwise. Silently swallows all network/parse errors.
     pub(super) fn check_for_update_task() -> Task<Message> {
         // Derived from `repository` in Cargo.toml via CARGO_PKG_REPOSITORY.
@@ -74,7 +74,16 @@ impl EasyHarvest {
                 let current = parse_semver(env!("CARGO_PKG_VERSION"))?;
                 let latest = parse_semver(tag)?;
 
-                if latest > current { Some(tag.to_owned()) } else { None }
+                if latest <= current {
+                    return None;
+                }
+
+                let assets = json
+                    .get("assets")
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| crate::update_installer::find_update_assets(arr));
+
+                Some((tag.to_owned(), assets))
             },
             Message::UpdateCheckResult,
         )
