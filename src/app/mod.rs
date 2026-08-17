@@ -18,6 +18,7 @@ use crate::state::overtime_adjustments::OvertimeAdjustmentStore;
 use crate::state::work_day::WorkPhase;
 use crate::stats::{year_to_date_balance, HolidayStats, YearBalance};
 use crate::ui::{billable_view, day_view, project_tracking_view, settings_view, stats_view, vacation_view};
+use crate::update_installer::{InstallError, UpdateAssets};
 
 mod tasks;
 mod update;
@@ -161,6 +162,27 @@ pub enum Page {
     ProjectTracking,
 }
 
+// ── Update state ─────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub enum UpdateState {
+    /// No known-newer version (either not checked yet, or check found none).
+    Idle,
+    /// A newer version is available. `assets` is `None` on platforms without
+    /// a self-update binary (macOS) — banner shows the manual link only.
+    Available { tag: String, assets: Option<UpdateAssets> },
+    Downloading { assets: UpdateAssets },
+    Verifying { assets: UpdateAssets },
+    Installing { assets: UpdateAssets },
+    /// Download, verification, or install failed before the binary was
+    /// replaced. The "Update now" button stays live to retry.
+    Failed { reason: String, assets: UpdateAssets },
+    /// The binary was replaced successfully, but relaunching the new
+    /// process failed. No retry — the download is already done and the
+    /// binary is already updated; the user just needs to start it by hand.
+    InstalledNeedsManualRestart(String),
+}
+
 // ── Sub-state structs ────────────────────────────────────────────────────────
 // Moved to their domain modules:
 //   EntryForm          → entries.rs
@@ -215,10 +237,18 @@ pub enum Message {
     // Current user — fetched on startup so we can filter time-entry requests
     CurrentUserLoaded(Result<i64, String>),
 
-    // Update check — Some(tag) when a newer release is available
-    UpdateCheckResult(Option<String>),
+    // Update check — Some((tag, assets)); assets is None on platforms
+    // without a self-update binary (macOS).
+    UpdateCheckResult(Option<(String, Option<UpdateAssets>)>),
     // Open the GitHub releases page in the default browser
     OpenReleases,
+    // User clicked "Update now" (valid from Available or Failed states)
+    StartUpdate,
+    // Download + checksum fetch finished: Ok((bytes, expected_checksum_hex))
+    UpdateDownloaded(Result<(Vec<u8>, String), String>),
+    // Binary replace + relaunch finished: Ok(()) means the new process was
+    // spawned and this process should now quit.
+    UpdateInstalled(Result<(), InstallError>),
 
     // Focus
     TabPressed { shift: bool },
@@ -267,7 +297,7 @@ pub struct EasyHarvest {
     pub window_id: Option<window::Id>,
     pub tray_available: bool,
     pub window_visible: bool,
-    pub update_available: Option<String>,
+    pub update_state: UpdateState,
 
     /// 0 = data-folder step, 1 = credentials step (first-run wizard only).
     pub wizard_step: u8,
@@ -437,7 +467,7 @@ impl EasyHarvest {
             billable: BillablePageState::new(today.year()),
             project_tracking,
             window_id: None,
-            update_available: None,
+            update_state: UpdateState::Idle,
             // Optimistically assume the tray works on Linux/Windows; set to false
             // only if the tray subscription reports a spawn failure.
             tray_available: cfg!(not(target_os = "macos")),
@@ -528,7 +558,7 @@ impl EasyHarvest {
             window_id: None,
             tray_available: false,
             window_visible: false,
-            update_available: None,
+            update_state: UpdateState::Idle,
             wizard_step: 1,
             overtime_year: today.year(),
             overtime_adjustments,
