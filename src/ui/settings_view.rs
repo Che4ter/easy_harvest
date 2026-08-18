@@ -3,8 +3,8 @@ use iced::widget::{button, column, container, row, scrollable, text, text_input,
 use iced::{Alignment, Element, Length};
 
 use crate::app::{
-    EasyHarvest, EntryMsg, Message, SettingsMsg, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD,
-    SUCCESS, SURFACE, TEXT_MUTED, TEXT_PRIMARY,
+    EasyHarvest, EntryMsg, Message, SettingsMsg, TeamMsg, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR,
+    FONT_SEMIBOLD, SUCCESS, SURFACE, TEXT_MUTED, TEXT_PRIMARY,
 };
 use super::{
     caption, card_style, delete_chip_btn, dropdown_container_style, field_label,
@@ -23,28 +23,32 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         };
     }
 
-    scrollable(
-        column![
-            sync_section(state),
-            profile_section(state),
-            carryover_section(state),
-            holidays_section(state),
-            holiday_tasks_section(state),
-            templates_section(state),
-            data_dir_section(state),
-            startup_section(state),
-            connection_section(state),
-            container(
-                caption(concat!("Easy Harvest v", env!("CARGO_PKG_VERSION"))),
-            )
+    let mut sections = column![
+        sync_section(state),
+        profile_section(state),
+        carryover_section(state),
+        holidays_section(state),
+        holiday_tasks_section(state),
+        templates_section(state),
+        team_lead_mode_section(state),
+    ]
+    .spacing(SECTION_GAP);
+
+    if state.settings.team_lead_mode {
+        sections = sections.push(team_management_section(state));
+    }
+
+    sections = sections.push(data_dir_section(state));
+    sections = sections.push(startup_section(state));
+    sections = sections.push(connection_section(state));
+    let version_footer: Element<'_, Message> =
+        container(caption(concat!("Easy Harvest v", env!("CARGO_PKG_VERSION"))))
             .width(Length::Fill)
-            .center_x(Length::Fill),
-        ]
-        .spacing(SECTION_GAP)
-        .padding(PAGE_PADDING),
-    )
-    .height(Length::Fill)
-    .into()
+            .center_x(Length::Fill)
+            .into();
+    sections = sections.push(version_footer);
+
+    scrollable(sections.padding(PAGE_PADDING)).height(Length::Fill).into()
 }
 
 // ── Wizard: step 0 — data folder ─────────────────────────────────────────────
@@ -682,6 +686,252 @@ fn data_dir_section(state: &EasyHarvest) -> Element<'_, Message> {
     .padding(12)
     .width(Length::Fill)
     .into()
+}
+
+// ── Team Lead Mode toggle ──────────────────────────────────────────────────
+
+fn team_lead_mode_section(state: &EasyHarvest) -> Element<'_, Message> {
+    let enabled = state.settings.team_lead_mode;
+    let btn_label = if enabled { "Enabled" } else { "Disabled" };
+
+    let toggle = button(text(btn_label).font(FONT_MEDIUM).size(12))
+        .style(move |_, _: button::Status| {
+            if enabled { toggle_active_style(6.0) } else { toggle_inactive_style(6.0) }
+        })
+        .padding([5, 14])
+        .on_press(Message::Settings(SettingsMsg::TeamLeadModeToggle));
+
+    container(
+        row![
+            column![
+                field_label("Team Lead Mode"),
+                caption(
+                    "Track your team's overtime and vacation, and add \
+                     teammates below. Turn this on if you manage other \
+                     people's time in Harvest.",
+                ),
+            ]
+            .spacing(3)
+            .width(Length::Fill),
+            toggle,
+        ]
+        .align_y(Alignment::Center),
+    )
+    .style(card_style)
+    .padding(12)
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Team management ──────────────────────────────────────────────────────
+
+fn team_management_section(state: &EasyHarvest) -> Element<'_, Message> {
+    let add_form = &state.team.add_form;
+
+    let error_el: Element<Message> = if let Some(err) = &add_form.error {
+        text(err.clone()).font(FONT_REGULAR).size(12).color(DANGER).into()
+    } else {
+        Space::new().into()
+    };
+
+    let add_row = column![
+        row![
+            text_input("Name", &add_form.name_input)
+                .on_input(|v| Message::Team(TeamMsg::NameChanged(v)))
+                .size(13)
+                .padding([8, 10])
+                .style(input_style)
+                .width(Length::FillPortion(2)),
+            text_input("Harvest user ID", &add_form.id_input)
+                .on_input(|v| Message::Team(TeamMsg::HarvestIdChanged(v)))
+                .size(13)
+                .padding([8, 10])
+                .style(input_style)
+                .width(Length::FillPortion(1)),
+            outline_btn_sm("+ Add").on_press(Message::Team(TeamMsg::AddMember)),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        error_el,
+    ]
+    .spacing(4);
+
+    let member_cards: Vec<Element<Message>> = state
+        .team_settings
+        .members
+        .iter()
+        .map(|m| team_member_settings_card(state, m))
+        .collect();
+
+    let members_list: Element<Message> = if member_cards.is_empty() {
+        text("No team members yet.").font(FONT_REGULAR).size(12).color(TEXT_MUTED).into()
+    } else {
+        column(member_cards).spacing(SECTION_GAP).into()
+    };
+
+    container(
+        column![
+            section_heading("Team"),
+            caption(
+                "Add teammates by name and their numeric Harvest user ID \
+                 (found in their profile URL in Harvest's web UI).",
+            ),
+            add_row,
+            members_list,
+        ]
+        .spacing(SECTION_GAP),
+    )
+    .style(card_style)
+    .padding(12)
+    .width(Length::Fill)
+    .into()
+}
+
+fn team_member_settings_card<'a>(
+    state: &'a EasyHarvest,
+    member: &'a crate::state::team::TeamMember,
+) -> Element<'a, Message> {
+    let id = member.harvest_user_id;
+    let year = Local::now().naive_local().date().year();
+
+    let header = row![
+        text(member.display_name.clone()).font(FONT_SEMIBOLD).size(14).color(TEXT_PRIMARY),
+        caption(format!("#{id}")),
+        Space::new().width(Length::Fill),
+        delete_chip_btn(Message::Team(TeamMsg::RemoveMember(id))),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let carryover_rows: Vec<Element<Message>> = {
+        let mut entries: Vec<(i32, &crate::state::settings::YearCarryover)> =
+            member.carryover.iter().map(|(y, c)| (*y, c)).collect();
+        entries.sort_by_key(|b| std::cmp::Reverse(b.0));
+        entries
+            .iter()
+            .map(|(y, c)| {
+                let year = *y;
+                row![
+                    caption(format!("{} → {}", year - 1, year)),
+                    text(format!("{:.1}h vac", c.holiday_hours))
+                        .font(FONT_MEDIUM)
+                        .size(12)
+                        .color(TEXT_PRIMARY),
+                    text(format!("{:+.1}h OT", c.overtime_hours))
+                        .font(FONT_MEDIUM)
+                        .size(12)
+                        .color(if c.overtime_hours >= 0.0 { SUCCESS } else { DANGER }),
+                    Space::new().width(Length::Fill),
+                    delete_chip_btn(Message::Team(TeamMsg::CarryoverDelete(id, year))),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .into()
+            })
+            .collect()
+    };
+
+    let carryover_list: Element<Message> = if carryover_rows.is_empty() {
+        text("No carryover entries yet.").font(FONT_REGULAR).size(12).color(TEXT_MUTED).into()
+    } else {
+        column(carryover_rows).spacing(LIST_ROW_SPACING).into()
+    };
+
+    let recalc_btn = outline_btn_sm("↺ Recalculate All")
+        .on_press(Message::Team(TeamMsg::CarryoverReset(id)));
+
+    let adjustments = member.overtime_adjustments.adjustments_for(year);
+    let adj_rows: Vec<Element<Message>> = adjustments
+        .iter()
+        .map(|a| {
+            row![
+                caption(a.date.clone()),
+                text(format!("{:+.1}h", a.hours))
+                    .font(FONT_MEDIUM)
+                    .size(12)
+                    .color(if a.hours >= 0.0 { SUCCESS } else { DANGER }),
+                text(a.reason.clone())
+                    .font(FONT_REGULAR)
+                    .size(12)
+                    .color(TEXT_MUTED)
+                    .width(Length::Fill),
+                delete_chip_btn(Message::Team(TeamMsg::AdjDelete(id, a.id))),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
+        })
+        .collect();
+
+    let adj_list: Element<Message> = if adj_rows.is_empty() {
+        text("No manual adjustments.").font(FONT_REGULAR).size(12).color(TEXT_MUTED).into()
+    } else {
+        column(adj_rows).spacing(LIST_ROW_SPACING).into()
+    };
+
+    let adj_toggle = if state.team.adjustment_forms.contains_key(&id) {
+        outline_btn_sm("Cancel").on_press(Message::Team(TeamMsg::AdjHideForm(id)))
+    } else {
+        outline_btn_sm("+ Add Adjustment").on_press(Message::Team(TeamMsg::AdjShowForm(id)))
+    };
+
+    let mut body = column![
+        header,
+        caption("Carryover"),
+        carryover_list,
+        row![Space::new().width(Length::Fill), recalc_btn],
+        caption(format!("Manual overtime adjustments ({year})")),
+        adj_list,
+        row![Space::new().width(Length::Fill), adj_toggle],
+    ]
+    .spacing(8);
+
+    if let Some(form) = state.team.adjustment_forms.get(&id) {
+        let err: Element<Message> = if let Some(e) = &form.error {
+            text(e.clone()).font(FONT_REGULAR).size(12).color(DANGER).into()
+        } else {
+            Space::new().into()
+        };
+        body = body.push(
+            column![
+                row![
+                    text_input("DD.MM.YYYY", &form.date_input)
+                        .on_input(move |v| Message::Team(TeamMsg::AdjDateChanged(id, v)))
+                        .size(13)
+                        .padding([6, 10])
+                        .style(input_style)
+                        .width(Length::FillPortion(1)),
+                    text_input("Hours (+/-)", &form.hours_input)
+                        .on_input(move |v| Message::Team(TeamMsg::AdjHoursChanged(id, v)))
+                        .size(13)
+                        .padding([6, 10])
+                        .style(input_style)
+                        .width(Length::FillPortion(1)),
+                    text_input("Reason", &form.reason_input)
+                        .on_input(move |v| Message::Team(TeamMsg::AdjReasonChanged(id, v)))
+                        .size(13)
+                        .padding([6, 10])
+                        .style(input_style)
+                        .width(Length::FillPortion(2)),
+                    outline_btn_sm("Save").on_press(Message::Team(TeamMsg::AdjSubmit(id))),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+                err,
+            ]
+            .spacing(4),
+        );
+    }
+
+    container(body)
+        .style(|_| container::Style {
+            background: Some(iced::Background::Color(SURFACE)),
+            border: iced::Border { radius: 8.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .padding(10)
+        .width(Length::Fill)
+        .into()
 }
 
 // ── Autostart section ─────────────────────────────────────────────────────────
