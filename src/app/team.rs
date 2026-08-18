@@ -68,6 +68,20 @@ impl EasyHarvest {
         }
     }
 
+    /// Kick off carryover sync for every team member, mirroring the personal
+    /// account's `SettingsMsg::CarryoverSyncStart` call in `CurrentUserLoaded`.
+    /// No-ops entirely when Team Lead Mode is off so non-team-lead users never
+    /// pay for these extra fetches.
+    pub(super) fn start_all_team_carryover_syncs(&mut self) -> Task<Message> {
+        if !self.settings.team_lead_mode {
+            return Task::none();
+        }
+        let ids: Vec<i64> = self.team_settings.members.iter().map(|m| m.harvest_user_id).collect();
+        Task::batch(
+            ids.into_iter().map(|id| self.update_team(TeamMsg::CarryoverSyncStart(id))).collect::<Vec<_>>()
+        )
+    }
+
     pub(super) fn update_team(&mut self, msg: TeamMsg) -> Task<Message> {
         match msg {
             TeamMsg::Refresh => {

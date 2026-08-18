@@ -3,6 +3,7 @@ pub mod day_view;
 pub mod project_tracking_view;
 pub mod settings_view;
 pub mod stats_view;
+pub mod team_view;
 pub mod vacation_view;
 
 use iced::widget::{button, column, container, row, stack, text, text_input, Space};

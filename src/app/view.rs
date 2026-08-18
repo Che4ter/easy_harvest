@@ -13,9 +13,10 @@ impl EasyHarvest {
             Page::Vacation => vacation_view::view(self),
             Page::Billable => billable_view::view(self),
             Page::ProjectTracking => project_tracking_view::view(self),
+            Page::Team => team_view::view(self),
         };
 
-        let nav = nav_bar(&self.page);
+        let nav = nav_bar(&self.page, self.settings.team_lead_mode);
 
         let mut col = column![nav].spacing(0).height(iced::Length::Fill);
 
@@ -42,7 +43,7 @@ impl EasyHarvest {
 
 // ── Nav bar ───────────────────────────────────────────────────────────────────
 
-fn nav_bar(current: &Page) -> Element<'static, Message> {
+fn nav_bar(current: &Page, team_lead_mode: bool) -> Element<'static, Message> {
     let btn = |label: &'static str, page: Page, active: bool| {
         let style = if active {
             button::Style {
@@ -99,26 +100,31 @@ fn nav_bar(current: &Page) -> Element<'static, Message> {
     .padding([6, 12])
     .on_press(Message::Nav(NavMsg::PageChanged(Page::Settings)));
 
-    container(
-        row![
-            btn("Day", Page::Day, *current == Page::Day),
-            btn("Vacation", Page::Vacation, *current == Page::Vacation),
-            btn("Overtime", Page::Stats, *current == Page::Stats),
-            btn("Billable", Page::Billable, *current == Page::Billable),
-            btn("Projects", Page::ProjectTracking, *current == Page::ProjectTracking),
-            Space::new().width(iced::Length::Fill),
-            settings_btn,
-        ]
-        .spacing(6)
-        .align_y(iced::Alignment::Center),
-    )
-    .style(|_| container::Style {
-        background: Some(iced::Background::Color(SURFACE)),
-        ..Default::default()
-    })
-    .padding([10, 16])
-    .width(iced::Length::Fill)
-    .into()
+    let mut nav_row = row![
+        btn("Day", Page::Day, *current == Page::Day),
+        btn("Vacation", Page::Vacation, *current == Page::Vacation),
+        btn("Overtime", Page::Stats, *current == Page::Stats),
+        btn("Billable", Page::Billable, *current == Page::Billable),
+        btn("Projects", Page::ProjectTracking, *current == Page::ProjectTracking),
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center);
+
+    if team_lead_mode {
+        nav_row = nav_row.push(btn("Team", Page::Team, *current == Page::Team));
+    }
+
+    nav_row = nav_row.push(Space::new().width(iced::Length::Fill));
+    nav_row = nav_row.push(settings_btn);
+
+    container(nav_row)
+        .style(|_| container::Style {
+            background: Some(iced::Background::Color(SURFACE)),
+            ..Default::default()
+        })
+        .padding([10, 16])
+        .width(iced::Length::Fill)
+        .into()
 }
 
 fn error_banner(msg: &str) -> Element<'_, Message> {

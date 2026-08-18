@@ -17,7 +17,7 @@ use crate::state::overtime_adjustments::OvertimeAdjustmentStore;
 #[cfg(not(target_os = "macos"))]
 use crate::state::work_day::WorkPhase;
 use crate::stats::{year_to_date_balance, HolidayStats, YearBalance};
-use crate::ui::{billable_view, day_view, project_tracking_view, settings_view, stats_view, vacation_view};
+use crate::ui::{billable_view, day_view, project_tracking_view, settings_view, stats_view, team_view, vacation_view};
 use crate::update_installer::{InstallError, UpdateAssets};
 
 mod tasks;
@@ -162,6 +162,7 @@ pub enum Page {
     Vacation,
     Billable,
     ProjectTracking,
+    Team,
 }
 
 // ── Update state ─────────────────────────────────────────────────────────────

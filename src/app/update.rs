@@ -74,6 +74,7 @@ impl EasyHarvest {
                             self.dispatch_page_load(&self.page.clone()),
                             // Background: compute any missing carryover entries.
                             self.update_settings(SettingsMsg::CarryoverSyncStart),
+                            self.start_all_team_carryover_syncs(),
                         ])
                     }
                     Err(e) => {
@@ -245,7 +246,7 @@ impl EasyHarvest {
     /// Callers must ensure `self.harvest_user_id` has resolved whenever
     /// `self.client.is_some()`, so manager-role accounts never fetch
     /// unfiltered time entries.
-    fn dispatch_page_load(&mut self, page: &Page) -> Task<Message> {
+    pub(super) fn dispatch_page_load(&mut self, page: &Page) -> Task<Message> {
         match page {
             Page::Day => {
                 self.loading = true;
@@ -292,6 +293,16 @@ impl EasyHarvest {
                 } else {
                     Task::none()
                 }
+            }
+            Page::Team => {
+                // Team page tracks loading per-member (`TeamMemberStats::loading`),
+                // not via the global `self.loading` flag, so we don't set it here —
+                // nothing would ever clear it (`MemberStatsLoaded` only clears the
+                // per-member flag), and doing so would leave a stuck global spinner
+                // whenever this arm runs after a deferred `CurrentUserLoaded`.
+                // `TeamMsg::Refresh` bumps `self.team.r#gen` itself, so we don't
+                // duplicate that increment here.
+                self.update_team(TeamMsg::Refresh)
             }
         }
     }

@@ -1419,3 +1419,29 @@ fn adj_delete_removes_entry_by_id() {
 
     assert!(app.team_settings.member(9).unwrap().overtime_adjustments.adjustments_for(year).is_empty());
 }
+
+// ── Task 6: Page::Team / Message::Team routing, dispatch, startup sync ───────
+
+#[test]
+fn dispatch_page_load_team_does_not_panic_without_client() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(1, "X"));
+    // client is None in test_instance, so the spawned load task itself must
+    // resolve to Task::none() rather than panicking on an unwrap of a missing
+    // client — but dispatch should still mark the member as loading via
+    // TeamMsg::Refresh, which is the observable effect we pin here.
+    let _ = app.dispatch_page_load(&Page::Team);
+    assert!(app.team.stats.get(&1).map(|s| s.loading).unwrap_or(false));
+}
+
+#[test]
+fn start_all_team_carryover_syncs_noop_when_team_lead_mode_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.settings.team_lead_mode = false;
+    app.team_settings.members.push(team_member(1, "X"));
+    // Should not panic; with client: None every branch resolves to Task::none()
+    // regardless, but this also documents that the gate exists.
+    let _ = app.start_all_team_carryover_syncs();
+}
