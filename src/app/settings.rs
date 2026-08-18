@@ -222,6 +222,7 @@ impl EasyHarvest {
                 self.billable_gen = 0;
                 self.stats_gen = 0;
                 self.project_tracking_gen = 0;
+                self.team.r#gen = 0;
                 // Determine wizard step: skip data-folder step if bootstrap exists.
                 self.wizard_step =
                     if BootstrapConfig::config_path().exists() { 1 } else { 0 };
