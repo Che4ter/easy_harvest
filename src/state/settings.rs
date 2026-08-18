@@ -148,6 +148,12 @@ pub struct Settings {
     #[serde(default)]
     pub first_work_day: Option<NaiveDate>,
 
+    /// Enables the Team tab and Team management section in Settings.
+    /// Manual toggle only — the Harvest "manager" access role is per-project,
+    /// not a reliable "is a team lead" signal, so this is never auto-detected.
+    #[serde(default)]
+    pub team_lead_mode: bool,
+
     /// Whether the app is registered to launch at login.
     /// Synced with the OS autostart state on every load — not persisted to JSON.
     #[serde(skip)]
@@ -164,6 +170,55 @@ fn default_work_percentage() -> f64 {
 
 fn default_holiday_days() -> u32 {
     25
+}
+
+// ---------------------------------------------------------------------------
+// Vacation entitlement calculation (shared between Settings and TeamMember)
+// ---------------------------------------------------------------------------
+
+/// Effective vacation-day entitlement for `year`: base days per year, prorated
+/// by `first_work_day` when employment started mid-year, plus carryover from
+/// the previous year. Shared by `Settings::effective_holiday_days_for` and
+/// `TeamMember::effective_holiday_days_for` (src/state/team.rs) so the two
+/// never drift into separately-maintained copies of the same formula.
+pub fn effective_holiday_days(
+    total_holiday_days_per_year: u32,
+    first_work_day: Option<NaiveDate>,
+    carryover: &HashMap<i32, YearCarryover>,
+    expected_hours_per_day: f64,
+    year: i32,
+) -> f64 {
+    // M2-F2: years entirely before employment started contribute zero entitlement.
+    if let Some(fwd) = first_work_day
+        && year < fwd.year() {
+        return 0.0;
+    }
+    let base = if let Some(fwd) = first_work_day {
+        if fwd.year() == year {
+            let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
+            let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+            let days_in_year = year_end.signed_duration_since(year_start).num_days() + 1;
+            let days_worked = (year_end.signed_duration_since(fwd).num_days() + 1)
+                .min(days_in_year)
+                .max(0);
+            total_holiday_days_per_year as f64
+                * days_worked as f64
+                / days_in_year as f64
+        } else {
+            total_holiday_days_per_year as f64
+        }
+    } else {
+        total_holiday_days_per_year as f64
+    };
+    base + carryover.get(&year).map(|c| {
+        if c.holiday_hours == 0.0 && c.legacy_holiday_days > 0.0 {
+            c.legacy_holiday_days
+        } else if expected_hours_per_day > 0.0 {
+            c.holiday_hours / expected_hours_per_day
+        } else {
+            0.0
+        }
+    }).unwrap_or(0.0)
 }
 
 impl Settings {
@@ -184,42 +239,13 @@ impl Settings {
     /// When `first_work_day` falls within `year`, entitlement is prorated by
     /// the fraction of the year actually worked.
     pub fn effective_holiday_days_for(&self, year: i32) -> f64 {
-        // M2-F2: years entirely before employment started contribute zero entitlement.
-        if let Some(fwd) = self.first_work_day
-            && year < fwd.year() {
-            return 0.0;
-        }
-        let base = if let Some(fwd) = self.first_work_day {
-            if fwd.year() == year {
-                let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
-                let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-                let days_in_year = year_end.signed_duration_since(year_start).num_days() + 1;
-                let days_worked = (year_end.signed_duration_since(fwd).num_days() + 1)
-                    .min(days_in_year)
-                    .max(0);
-                self.total_holiday_days_per_year as f64
-                    * days_worked as f64
-                    / days_in_year as f64
-            } else {
-                self.total_holiday_days_per_year as f64
-            }
-        } else {
-            self.total_holiday_days_per_year as f64
-        };
-        let epd = self.expected_hours_per_day();
-        base + self.carryover.get(&year).map(|c| {
-            // Migration: data written before the holiday_days→holiday_hours rename stored
-            // the value as days rather than hours.  Detect this by checking whether the
-            // modern field is zero while the legacy field is non-zero, and use the legacy
-            // days value directly (no EPD conversion needed — it was already in days).
-            if c.holiday_hours == 0.0 && c.legacy_holiday_days > 0.0 {
-                c.legacy_holiday_days
-            } else if epd > 0.0 {
-                c.holiday_hours / epd
-            } else {
-                0.0
-            }
-        }).unwrap_or(0.0)
+        effective_holiday_days(
+            self.total_holiday_days_per_year,
+            self.first_work_day,
+            &self.carryover,
+            self.expected_hours_per_day(),
+            year,
+        )
     }
 
     /// Overtime carryover hours for the given year (0.0 if not set).
@@ -254,6 +280,7 @@ impl Default for Settings {
             carryover: HashMap::new(),
             holiday_task_ids: Vec::new(),
             first_work_day: None,
+            team_lead_mode: false,
             autostart: false,
         }
     }
@@ -854,5 +881,28 @@ mod tests {
 
         // 25 + 2.0 days (converted from hours)
         assert!((s.effective_holiday_days_for(2025) - 27.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn effective_holiday_days_matches_method_for_prorated_first_year() {
+        let mut carryover = HashMap::new();
+        carryover.insert(2025, YearCarryover { holiday_hours: 13.12, ..Default::default() });
+        let fwd = NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
+        let direct = effective_holiday_days(25, Some(fwd), &carryover, 8.2, 2025);
+
+        let s = Settings {
+            total_holiday_days_per_year: 25,
+            first_work_day: Some(fwd),
+            carryover,
+            total_weekly_hours: 41.0,
+            work_percentage: 1.0,
+            ..Default::default()
+        };
+        assert!((direct - s.effective_holiday_days_for(2025)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn team_lead_mode_defaults_to_false() {
+        assert!(!Settings::default().team_lead_mode);
     }
 }
