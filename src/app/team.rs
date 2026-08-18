@@ -25,6 +25,7 @@ pub struct TeamPageState {
     pub add_form: TeamMemberForm,
     pub stats: HashMap<i64, TeamMemberStats>,
     pub adjustment_forms: HashMap<i64, OvertimeAdjustmentForm>,
+    pub first_work_day_inputs: HashMap<i64, String>,
     pub r#gen: u64,
 }
 
@@ -46,6 +47,8 @@ pub enum TeamMsg {
     HarvestIdChanged(String),
     AddMember,
     RemoveMember(i64),
+    FirstWorkDayInputChanged(i64, String),
+    FirstWorkDaySave(i64),
 
     CarryoverDelete(i64, i32),
     CarryoverSyncStart(i64),
@@ -85,6 +88,9 @@ impl EasyHarvest {
     pub(super) fn update_team(&mut self, msg: TeamMsg) -> Task<Message> {
         match msg {
             TeamMsg::Refresh => {
+                if self.client.is_none() {
+                    return Task::none();
+                }
                 self.team.r#gen += 1;
                 for member in &self.team_settings.members {
                     self.team.stats.entry(member.harvest_user_id).or_default().loading = true;
@@ -165,8 +171,40 @@ impl EasyHarvest {
                 self.team_settings.members.retain(|m| m.harvest_user_id != id);
                 self.team.stats.remove(&id);
                 self.team.adjustment_forms.remove(&id);
+                self.team.first_work_day_inputs.remove(&id);
+                self.team.r#gen += 1;
                 self.save_team_or_warn();
                 Task::none()
+            }
+
+            TeamMsg::FirstWorkDayInputChanged(id, v) => {
+                self.team.first_work_day_inputs.insert(id, v);
+                Task::none()
+            }
+
+            TeamMsg::FirstWorkDaySave(id) => {
+                let raw = self.team.first_work_day_inputs.get(&id).cloned().unwrap_or_default();
+                let raw = raw.trim().to_string();
+                let parsed = if raw.is_empty() {
+                    None
+                } else {
+                    match NaiveDate::parse_from_str(&raw, "%d.%m.%Y") {
+                        Ok(d) => Some(d),
+                        Err(_) => {
+                            self.error_banner =
+                                Some("Invalid first work day — use DD.MM.YYYY.".into());
+                            return Task::none();
+                        }
+                    }
+                };
+                let Some(member) = self.team_settings.member_mut(id) else { return Task::none(); };
+                member.first_work_day = parsed;
+                if let Some(fwd) = parsed {
+                    member.carryover.entry(fwd.year()).or_default();
+                }
+                self.save_team_or_warn();
+                self.team.first_work_day_inputs.remove(&id);
+                self.update_team(TeamMsg::CarryoverSyncStart(id))
             }
 
             TeamMsg::CarryoverDelete(id, year) => {

@@ -803,6 +803,22 @@ fn team_member_settings_card<'a>(
     .spacing(8)
     .align_y(Alignment::Center);
 
+    let fwd_display = state.team.first_work_day_inputs.get(&id).cloned().unwrap_or_else(|| {
+        member.first_work_day.map(|d| d.format("%d.%m.%Y").to_string()).unwrap_or_default()
+    });
+    let fwd_row = row![
+        field_label("First work day"),
+        text_input("DD.MM.YYYY", &fwd_display)
+            .on_input(move |v| Message::Team(TeamMsg::FirstWorkDayInputChanged(id, v)))
+            .size(13)
+            .padding([6, 10])
+            .style(input_style)
+            .width(Length::Fixed(120.0)),
+        outline_btn_sm("Save").on_press(Message::Team(TeamMsg::FirstWorkDaySave(id))),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
     let carryover_rows: Vec<Element<Message>> = {
         let mut entries: Vec<(i32, &crate::state::settings::YearCarryover)> =
             member.carryover.iter().map(|(y, c)| (*y, c)).collect();
@@ -877,6 +893,7 @@ fn team_member_settings_card<'a>(
 
     let mut body = column![
         header,
+        fwd_row,
         caption("Carryover"),
         carryover_list,
         row![Space::new().width(Length::Fill), recalc_btn],

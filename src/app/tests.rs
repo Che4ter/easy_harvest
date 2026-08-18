@@ -1427,12 +1427,12 @@ fn dispatch_page_load_team_does_not_panic_without_client() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());
     app.team_settings.members.push(team_member(1, "X"));
-    // client is None in test_instance, so the spawned load task itself must
-    // resolve to Task::none() rather than panicking on an unwrap of a missing
-    // client — but dispatch should still mark the member as loading via
-    // TeamMsg::Refresh, which is the observable effect we pin here.
+    // client is None in test_instance, so TeamMsg::Refresh must no-op entirely
+    // rather than marking members as loading — otherwise the cards would be
+    // stuck on "Loading…" forever with no fetch task ever able to clear the
+    // flag. That no-op (and not panicking) is the observable effect we pin here.
     let _ = app.dispatch_page_load(&Page::Team);
-    assert!(app.team.stats.get(&1).map(|s| s.loading).unwrap_or(false));
+    assert!(!app.team.stats.get(&1).map(|s| s.loading).unwrap_or(false));
 }
 
 #[test]
