@@ -1218,3 +1218,13 @@ fn fill_remaining_targets_worked_time_not_expected_daily_hours() {
 // already exercised by `vacation_summary_zero_epd_no_nan` above.  The per-row
 // guard in vacation_view.rs is verified by code inspection.
 // Spec reference: docs/superpowers/specs — 06-ui.md F4.
+
+// ── Task 3: TeamSettings wired into app struct/startup ───────────────────────
+
+#[test]
+fn test_instance_has_empty_team_roster() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = EasyHarvest::test_instance(dir.path());
+    assert!(app.team_settings.members.is_empty());
+    assert!(!app.settings.team_lead_mode);
+}

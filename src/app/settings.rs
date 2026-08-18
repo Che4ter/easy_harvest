@@ -172,6 +172,10 @@ pub enum SettingsMsg {
     CarryoverSyncLoaded(i32, Result<(crate::stats::YearBalance, crate::stats::HolidayStats), String>),
     /// Clear all auto-computed carryover entries, re-seed, and re-run CarryoverSyncStart.
     CarryoverReset,
+
+    /// Toggle Team Lead Mode — shows/hides the Team tab and Team management
+    /// section. Manual only; never auto-detected from Harvest permissions.
+    TeamLeadModeToggle,
 }
 
 impl EasyHarvest {
@@ -851,6 +855,7 @@ impl EasyHarvest {
                 self.holiday_stats = None;
                 self.overtime_adjustments = OvertimeAdjustmentStore::load(&new_dir);
                 self.overtime_adj_form = None;
+                self.team_settings = crate::state::team::TeamSettings::load(&new_dir);
                 self.settings_form.data_dir_saved = true;
                 if self.client.is_some() {
                     self.loading = true;
@@ -883,6 +888,12 @@ impl EasyHarvest {
                 }
                 Task::none()
             }
+
+            SettingsMsg::TeamLeadModeToggle => {
+                self.settings.team_lead_mode = !self.settings.team_lead_mode;
+                self.save_settings_or_warn();
+                Task::none()
+            }
         }
     }
 }
@@ -913,6 +924,7 @@ fn migrate_data_files(
         "templates.json",
         "overtime_adjustments.json",
         "project_budgets.json",
+        "team_settings.json",
     ];
     for name in &files {
         let src = old_dir.join(name);

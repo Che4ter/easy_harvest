@@ -29,6 +29,7 @@ mod vacation;
 mod billable;
 mod stats;
 mod subscription;
+mod team;
 mod view;
 mod project_tracking;
 
@@ -48,6 +49,7 @@ pub use settings::SettingsMsg;
 pub use settings::{SettingsFormState, ValidatedProfile, ValidatedCarryover, TemplateFormState};
 pub use project_tracking::ProjectTrackingMsg;
 pub use project_tracking::{ProjectTrackingPageState, BudgetSummary, BudgetForm};
+pub use team::TeamPageState;
 
 #[cfg(test)]
 mod tests;
@@ -291,6 +293,8 @@ pub struct EasyHarvest {
     pub vacation: VacationPageState,
     pub billable: BillablePageState,
     pub project_tracking: ProjectTrackingPageState,
+    pub team_settings: crate::state::team::TeamSettings,
+    pub team: TeamPageState,
     pub date_picker: DatePickerState,
 
     pub window_id: Option<window::Id>,
@@ -399,6 +403,7 @@ impl EasyHarvest {
         let templates = Templates::load(&settings.data_dir);
         let project_tracking = ProjectTrackingPageState::new(&settings.data_dir, today.year());
         let overtime_adjustments = OvertimeAdjustmentStore::load(&settings.data_dir);
+        let team_settings = crate::state::team::TeamSettings::load(&settings.data_dir);
         #[cfg(debug_assertions)]
         eprintln!("[startup] JSON loads done          {:?}", t0.elapsed());
 
@@ -465,6 +470,8 @@ impl EasyHarvest {
             date_picker: DatePickerState::new(today),
             billable: BillablePageState::new(today.year()),
             project_tracking,
+            team_settings,
+            team: TeamPageState::new(),
             window_id: None,
             update_state: UpdateState::Idle,
             // Optimistically assume the tray works on Linux/Windows; set to false
@@ -524,6 +531,7 @@ impl EasyHarvest {
         let settings = Settings { data_dir: data_dir.to_path_buf(), ..Default::default() };
         let work_day_store = WorkDayStore::load(data_dir, today.year(), today.month());
         let overtime_adjustments = OvertimeAdjustmentStore::load(data_dir);
+        let team_settings = crate::state::team::TeamSettings::load(data_dir);
         let mut state = Self {
             page: Page::Day,
             settings,
@@ -553,6 +561,8 @@ impl EasyHarvest {
             vacation: VacationPageState::new(today.year()),
             billable: BillablePageState::new(today.year()),
             project_tracking: ProjectTrackingPageState::new(data_dir, today.year()),
+            team_settings,
+            team: TeamPageState::new(),
             date_picker: DatePickerState::new(today),
             window_id: None,
             tray_available: false,
