@@ -6,5 +6,6 @@ pub mod overtime_adjustments;
 pub mod persistence;
 pub mod project_budgets;
 pub mod settings;
+pub mod team;
 pub mod templates;
 pub mod work_day;
