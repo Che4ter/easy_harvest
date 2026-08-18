@@ -54,6 +54,9 @@ impl EasyHarvest {
             // ── Project Tracking ──
             Message::ProjectTracking(msg) => self.update_project_tracking(msg),
 
+            // ── Team ──
+            Message::Team(msg) => self.update_team(msg),
+
             // ── Stats ──
             Message::Stats(msg) => self.update_stats(msg),
 

@@ -1,8 +1,275 @@
+use super::*;
+use crate::state::settings::YearCarryover;
+use crate::state::team::TeamMember;
+use std::collections::HashMap;
+
+// ── Sub-state ────────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Default)]
-pub struct TeamPageState;
+pub struct TeamMemberForm {
+    pub name_input: String,
+    pub id_input: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TeamMemberStats {
+    pub year_balance: Option<YearBalance>,
+    pub holiday_stats: Option<HolidayStats>,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct TeamPageState {
+    pub add_form: TeamMemberForm,
+    pub stats: HashMap<i64, TeamMemberStats>,
+    pub adjustment_forms: HashMap<i64, OvertimeAdjustmentForm>,
+    pub r#gen: u64,
+}
 
 impl TeamPageState {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+}
+
+// ── Messages ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum TeamMsg {
+    /// Re-fetch current-year stats for every roster member.
+    Refresh,
+    MemberStatsLoaded(u64, i64, Result<(YearBalance, HolidayStats), String>),
+
+    NameChanged(String),
+    HarvestIdChanged(String),
+    AddMember,
+    RemoveMember(i64),
+
+    CarryoverDelete(i64, i32),
+    CarryoverSyncStart(i64),
+    CarryoverSyncLoaded(i64, i32, Result<(YearBalance, HolidayStats), String>),
+    CarryoverReset(i64),
+
+    AdjShowForm(i64),
+    AdjHideForm(i64),
+    AdjDateChanged(i64, String),
+    AdjHoursChanged(i64, String),
+    AdjReasonChanged(i64, String),
+    AdjSubmit(i64),
+    AdjDelete(i64, u64),
+}
+
+impl EasyHarvest {
+    fn save_team_or_warn(&mut self) {
+        if let Err(e) = self.team_settings.save(&self.settings.data_dir) {
+            self.error_banner = Some(format!("Failed to save team settings: {e}"));
+        }
+    }
+
+    pub(super) fn update_team(&mut self, msg: TeamMsg) -> Task<Message> {
+        match msg {
+            TeamMsg::Refresh => {
+                self.team.r#gen += 1;
+                for member in &self.team_settings.members {
+                    self.team.stats.entry(member.harvest_user_id).or_default().loading = true;
+                }
+                let members: Vec<TeamMember> = self.team_settings.members.clone();
+                Task::batch(
+                    members.iter().map(|m| self.load_team_member_stats_task(m)).collect::<Vec<_>>()
+                )
+            }
+
+            TeamMsg::MemberStatsLoaded(r#gen, user_id, result) => {
+                if r#gen != self.team.r#gen { return Task::none(); }
+                let entry = self.team.stats.entry(user_id).or_default();
+                entry.loading = false;
+                match result {
+                    Ok((balance, holidays)) => {
+                        entry.year_balance = Some(balance);
+                        entry.holiday_stats = Some(holidays);
+                        entry.error = None;
+                    }
+                    Err(e) => entry.error = Some(e),
+                }
+                Task::none()
+            }
+
+            TeamMsg::NameChanged(v) => {
+                self.team.add_form.name_input = v;
+                self.team.add_form.error = None;
+                Task::none()
+            }
+
+            TeamMsg::HarvestIdChanged(v) => {
+                self.team.add_form.id_input = v;
+                self.team.add_form.error = None;
+                Task::none()
+            }
+
+            TeamMsg::AddMember => {
+                let name = self.team.add_form.name_input.trim().to_string();
+                if name.is_empty() {
+                    self.team.add_form.error = Some("Enter a name.".into());
+                    return Task::none();
+                }
+                let id_str = self.team.add_form.id_input.trim().to_string();
+                let harvest_user_id: i64 = match id_str.parse() {
+                    Ok(v) if v > 0 => v,
+                    _ => {
+                        self.team.add_form.error =
+                            Some("Enter a valid Harvest user ID (positive number).".into());
+                        return Task::none();
+                    }
+                };
+                if self.team_settings.member(harvest_user_id).is_some() {
+                    self.team.add_form.error =
+                        Some("A team member with this Harvest user ID already exists.".into());
+                    return Task::none();
+                }
+                self.team_settings.members.push(TeamMember {
+                    harvest_user_id,
+                    display_name: name,
+                    expected_hours_per_day: self.settings.expected_hours_per_day(),
+                    total_holiday_days_per_year: self.settings.total_holiday_days_per_year,
+                    holiday_task_ids: self.settings.holiday_task_ids.clone(),
+                    first_work_day: None,
+                    carryover: HashMap::new(),
+                    overtime_adjustments: OvertimeAdjustmentStore::default(),
+                });
+                if let Err(e) = self.team_settings.save(&self.settings.data_dir) {
+                    self.team_settings.members.retain(|m| m.harvest_user_id != harvest_user_id);
+                    self.error_banner = Some(format!("Failed to save team roster: {e}"));
+                    return Task::none();
+                }
+                self.team.add_form = TeamMemberForm::default();
+                Task::done(Message::Team(TeamMsg::Refresh))
+            }
+
+            TeamMsg::RemoveMember(id) => {
+                self.team_settings.members.retain(|m| m.harvest_user_id != id);
+                self.team.stats.remove(&id);
+                self.team.adjustment_forms.remove(&id);
+                self.save_team_or_warn();
+                Task::none()
+            }
+
+            TeamMsg::CarryoverDelete(id, year) => {
+                if let Some(member) = self.team_settings.member_mut(id) {
+                    member.carryover.remove(&year);
+                }
+                self.save_team_or_warn();
+                Task::none()
+            }
+
+            TeamMsg::CarryoverReset(id) => {
+                if let Some(member) = self.team_settings.member_mut(id) {
+                    member.carryover.retain(|_, v| v.is_user_defined);
+                    if let Some(fwd) = member.first_work_day {
+                        member.carryover.entry(fwd.year()).or_default();
+                    }
+                }
+                self.save_team_or_warn();
+                self.update_team(TeamMsg::CarryoverSyncStart(id))
+            }
+
+            TeamMsg::CarryoverSyncStart(id) => {
+                let current_year = Local::now().naive_local().date().year();
+                let Some(member) = self.team_settings.member(id) else { return Task::none(); };
+                let Some(fwd) = member.first_work_day else { return Task::none(); };
+                let start = fwd.year();
+                match (start..current_year).find(|&y| !member.carryover.contains_key(&(y + 1))) {
+                    Some(first_missing) => self.load_team_carryover_sync_task(member, first_missing),
+                    None => Task::none(),
+                }
+            }
+
+            TeamMsg::CarryoverSyncLoaded(id, year, result) => {
+                let next = year + 1;
+                if let Some(member) = self.team_settings.member_mut(id) {
+                    match result {
+                        Ok((balance, holidays)) => {
+                            let user_defined =
+                                member.carryover.get(&next).is_some_and(|c| c.is_user_defined);
+                            if !user_defined {
+                                let epd = member.expected_hours_per_day;
+                                member.carryover.insert(next, YearCarryover {
+                                    overtime_hours: balance.total_balance,
+                                    holiday_hours: holidays.days_remaining * epd,
+                                    ..Default::default()
+                                });
+                            }
+                        }
+                        Err(_) => {
+                            member.carryover.entry(next).or_default();
+                        }
+                    }
+                }
+                self.save_team_or_warn();
+                self.update_team(TeamMsg::CarryoverSyncStart(id))
+            }
+
+            TeamMsg::AdjShowForm(id) => {
+                self.team.adjustment_forms.insert(id, OvertimeAdjustmentForm::default());
+                Task::none()
+            }
+
+            TeamMsg::AdjHideForm(id) => {
+                self.team.adjustment_forms.remove(&id);
+                Task::none()
+            }
+
+            TeamMsg::AdjDateChanged(id, v) => {
+                if let Some(f) = self.team.adjustment_forms.get_mut(&id) { f.date_input = v; f.error = None; }
+                Task::none()
+            }
+
+            TeamMsg::AdjHoursChanged(id, v) => {
+                if let Some(f) = self.team.adjustment_forms.get_mut(&id) { f.hours_input = v; f.error = None; }
+                Task::none()
+            }
+
+            TeamMsg::AdjReasonChanged(id, v) => {
+                if let Some(f) = self.team.adjustment_forms.get_mut(&id) { f.reason_input = v; f.error = None; }
+                Task::none()
+            }
+
+            TeamMsg::AdjSubmit(id) => {
+                let current_year = Local::now().naive_local().date().year();
+                let Some(form) = self.team.adjustment_forms.get(&id).cloned() else { return Task::none(); };
+                let validated = match form.validate(current_year) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        if let Some(f) = self.team.adjustment_forms.get_mut(&id) { f.error = Some(e); }
+                        return Task::none();
+                    }
+                };
+                if let Some(member) = self.team_settings.member_mut(id) {
+                    let adj_id = member.overtime_adjustments.next_id;
+                    member.overtime_adjustments.next_id += 1;
+                    member.overtime_adjustments.adjustments_for_mut(validated.date.year()).push(
+                        crate::state::overtime_adjustments::OvertimeAdjustment {
+                            id: adj_id,
+                            date: validated.date.format("%Y-%m-%d").to_string(),
+                            hours: validated.hours,
+                            reason: validated.reason,
+                        }
+                    );
+                }
+                self.save_team_or_warn();
+                self.team.adjustment_forms.remove(&id);
+                Task::done(Message::Team(TeamMsg::Refresh))
+            }
+
+            TeamMsg::AdjDelete(id, adj_id) => {
+                let current_year = Local::now().naive_local().date().year();
+                if let Some(member) = self.team_settings.member_mut(id) {
+                    member.overtime_adjustments.adjustments_for_mut(current_year).retain(|a| a.id != adj_id);
+                }
+                self.save_team_or_warn();
+                Task::done(Message::Team(TeamMsg::Refresh))
+            }
+        }
     }
 }

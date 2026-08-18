@@ -265,6 +265,106 @@ impl EasyHarvest {
         )
     }
 
+    /// Fetch current-year time entries for one team member and compute their
+    /// overtime/vacation stats via the same `year_balance_and_holidays` helper
+    /// the personal Stats page uses — the calculation is identical, only the
+    /// entries source (this member's Harvest user ID) and config (their
+    /// `TeamMember`) differ from the personal-account version.
+    pub(super) fn load_team_member_stats_task(
+        &self,
+        member: &crate::state::team::TeamMember,
+    ) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let today = Local::now().naive_local().date();
+        let year = today.year();
+        let from = format!("{year}-01-01");
+        let to = format!("{year}-12-31");
+        let balance_end = balance_end_for_year(year, today);
+        let expected_per_day = member.expected_hours_per_day;
+        let public_holidays = swiss_public_holidays(year);
+        let carryover = member.overtime_carryover_for(year);
+        let holiday_task_ids = member.holiday_task_ids.clone();
+        let total_holiday_days = member.effective_holiday_days_for(year);
+        let first_work_day = member.first_work_day;
+        let adj_total = member.overtime_adjustments.adjustments_total(year);
+        let r#gen = self.team.r#gen;
+        let user_id = member.harvest_user_id;
+
+        Task::perform(
+            async move {
+                let all_entries = client
+                    .list_all_time_entries(Some(user_id), &from, &to)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let effective_start = first_work_day.filter(|d| d.year() == year);
+                Ok(year_balance_and_holidays(
+                    &all_entries,
+                    year,
+                    balance_end,
+                    effective_start,
+                    expected_per_day,
+                    &public_holidays,
+                    carryover,
+                    adj_total,
+                    &holiday_task_ids,
+                    total_holiday_days,
+                ))
+            },
+            move |result| Message::Team(TeamMsg::MemberStatsLoaded(r#gen, user_id, result)),
+        )
+    }
+
+    /// Background task: load stats for a team member's specific past `year`
+    /// to derive their carryover into `year + 1`. Mirrors
+    /// `load_carryover_sync_task` exactly, parameterized by `member` instead
+    /// of `self.settings`/`self.overtime_adjustments`.
+    pub(super) fn load_team_carryover_sync_task(
+        &self,
+        member: &crate::state::team::TeamMember,
+        year: i32,
+    ) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let today = Local::now().naive_local().date();
+        let from = format!("{year}-01-01");
+        let to = format!("{year}-12-31");
+        let balance_end = balance_end_for_year(year, today);
+        let expected_per_day = member.expected_hours_per_day;
+        let public_holidays = swiss_public_holidays(year);
+        let carryover = member.overtime_carryover_for(year);
+        let holiday_task_ids = member.holiday_task_ids.clone();
+        let total_holiday_days = member.effective_holiday_days_for(year);
+        let first_work_day = member.first_work_day;
+        let adj_total = member.overtime_adjustments.adjustments_total(year);
+        let user_id = member.harvest_user_id;
+
+        Task::perform(
+            async move {
+                let all_entries = client
+                    .list_all_time_entries(Some(user_id), &from, &to)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let effective_start = first_work_day.filter(|d| d.year() == year);
+                Ok(year_balance_and_holidays(
+                    &all_entries,
+                    year,
+                    balance_end,
+                    effective_start,
+                    expected_per_day,
+                    &public_holidays,
+                    carryover,
+                    adj_total,
+                    &holiday_task_ids,
+                    total_holiday_days,
+                ))
+            },
+            move |result| Message::Team(TeamMsg::CarryoverSyncLoaded(user_id, year, result)),
+        )
+    }
+
     pub(super) fn load_vacation_task(&self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();

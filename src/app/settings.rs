@@ -214,6 +214,7 @@ impl EasyHarvest {
                 self.pending_delete = None;
                 self.templates = Templates::default();
                 self.cached_project_options = Vec::new();
+                self.team.stats.clear();
                 self.error_banner = None;
                 self.loading = false;
                 self.entries_gen = 0;

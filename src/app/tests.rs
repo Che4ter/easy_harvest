@@ -1228,3 +1228,194 @@ fn test_instance_has_empty_team_roster() {
     assert!(app.team_settings.members.is_empty());
     assert!(!app.settings.team_lead_mode);
 }
+
+// ── Task 4: TeamMsg / update_team ─────────────────────────────────────────────
+
+use crate::app::TeamMsg;
+use crate::state::team::TeamMember;
+use crate::state::overtime_adjustments::OvertimeAdjustmentStore;
+
+fn team_member(id: i64, name: &str) -> TeamMember {
+    TeamMember {
+        harvest_user_id: id,
+        display_name: name.into(),
+        expected_hours_per_day: 8.0,
+        total_holiday_days_per_year: 25,
+        holiday_task_ids: vec![],
+        first_work_day: None,
+        carryover: std::collections::HashMap::new(),
+        overtime_adjustments: OvertimeAdjustmentStore::default(),
+    }
+}
+
+#[test]
+fn add_member_rejects_empty_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team.add_form.id_input = "12345".into();
+    let _ = app.update_team(TeamMsg::AddMember);
+    assert!(app.team.add_form.error.is_some());
+    assert!(app.team_settings.members.is_empty());
+}
+
+#[test]
+fn add_member_rejects_non_numeric_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team.add_form.name_input = "Alex".into();
+    app.team.add_form.id_input = "not-a-number".into();
+    let _ = app.update_team(TeamMsg::AddMember);
+    assert!(app.team.add_form.error.is_some());
+    assert!(app.team_settings.members.is_empty());
+}
+
+#[test]
+fn add_member_rejects_duplicate_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(99, "Existing"));
+    app.team.add_form.name_input = "Alex".into();
+    app.team.add_form.id_input = "99".into();
+    let _ = app.update_team(TeamMsg::AddMember);
+    assert!(app.team.add_form.error.is_some());
+    assert_eq!(app.team_settings.members.len(), 1);
+}
+
+#[test]
+fn add_member_succeeds_and_persists() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team.add_form.name_input = "Alex".into();
+    app.team.add_form.id_input = "555".into();
+    let _ = app.update_team(TeamMsg::AddMember);
+    assert!(app.team.add_form.error.is_none());
+    assert_eq!(app.team_settings.members.len(), 1);
+    assert_eq!(app.team_settings.members[0].harvest_user_id, 555);
+    assert_eq!(app.team_settings.members[0].display_name, "Alex");
+    // New member inherits the team lead's own defaults so stats compute
+    // sensibly before anyone edits them.
+    assert_eq!(app.team_settings.members[0].expected_hours_per_day, app.settings.expected_hours_per_day());
+
+    let reloaded = crate::state::team::TeamSettings::load(dir.path());
+    assert_eq!(reloaded.members.len(), 1, "AddMember must persist to disk");
+}
+
+#[test]
+fn remove_member_clears_stats_and_forms() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(7, "Bye"));
+    app.team.stats.insert(7, crate::app::TeamMemberStats::default());
+    app.team.adjustment_forms.insert(7, crate::app::OvertimeAdjustmentForm::default());
+
+    let _ = app.update_team(TeamMsg::RemoveMember(7));
+
+    assert!(app.team_settings.members.is_empty());
+    assert!(!app.team.stats.contains_key(&7));
+    assert!(!app.team.adjustment_forms.contains_key(&7));
+    let reloaded = crate::state::team::TeamSettings::load(dir.path());
+    assert!(reloaded.members.is_empty(), "RemoveMember must persist to disk");
+}
+
+#[test]
+fn member_stats_loaded_ignores_stale_generation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team.r#gen = 5;
+    let _ = app.update_team(TeamMsg::MemberStatsLoaded(
+        4, // stale gen
+        1,
+        Err("should be ignored".into()),
+    ));
+    assert!(app.team.stats.get(&1).is_none());
+}
+
+#[test]
+fn member_stats_loaded_stores_result_for_current_generation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team.r#gen = 1;
+    let _ = app.update_team(TeamMsg::MemberStatsLoaded(1, 1, Err("boom".into())));
+    let s = app.team.stats.get(&1).expect("entry must be created");
+    assert_eq!(s.error.as_deref(), Some("boom"));
+    assert!(!s.loading);
+}
+
+#[test]
+fn carryover_delete_removes_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut m = team_member(3, "Carry");
+    m.carryover.insert(2026, crate::state::settings::YearCarryover::default());
+    app.team_settings.members.push(m);
+
+    let _ = app.update_team(TeamMsg::CarryoverDelete(3, 2026));
+
+    assert!(!app.team_settings.member(3).unwrap().carryover.contains_key(&2026));
+}
+
+#[test]
+fn carryover_sync_loaded_preserves_user_defined_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut m = team_member(3, "Carry");
+    m.first_work_day = Some(chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+    m.carryover.insert(2026, crate::state::settings::YearCarryover {
+        holiday_hours: 12.0, overtime_hours: -2.0, is_user_defined: true, ..Default::default()
+    });
+    app.team_settings.members.push(m);
+
+    let _ = app.update_team(TeamMsg::CarryoverSyncLoaded(
+        3, 2025,
+        Ok((crate::stats::YearBalance {
+            period: crate::stats::PeriodStats {
+                total_hours: 0.0,
+                expected_hours: 0.0,
+                balance_hours: 0.0,
+                working_days_expected: 0,
+                days_with_entries: 0,
+            },
+            carryover_hours: 0.0, manual_adjustments_hours: 0.0, total_balance: 999.0,
+        }, crate::stats::HolidayStats { days_taken: 0.0, days_remaining: 0.0, total_days: 0.0 })),
+    ));
+
+    let entry = &app.team_settings.member(3).unwrap().carryover[&2026];
+    assert_eq!(entry.holiday_hours, 12.0, "user-defined entry must not be overwritten");
+    assert_eq!(entry.overtime_hours, -2.0);
+}
+
+#[test]
+fn adj_submit_rejects_invalid_form_without_mutating_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Adj"));
+    app.team.adjustment_forms.insert(9, crate::app::OvertimeAdjustmentForm {
+        date_input: "not-a-date".into(),
+        hours_input: "4".into(),
+        reason_input: "test".into(),
+        error: None,
+    });
+
+    let _ = app.update_team(TeamMsg::AdjSubmit(9));
+
+    assert!(app.team.adjustment_forms.get(&9).unwrap().error.is_some());
+    assert!(app.team_settings.member(9).unwrap().overtime_adjustments.adjustments_for(chrono::Local::now().naive_local().date().year()).is_empty());
+}
+
+#[test]
+fn adj_delete_removes_entry_by_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut m = team_member(9, "Adj");
+    let year = chrono::Local::now().naive_local().date().year();
+    m.overtime_adjustments.adjustments_for_mut(year).push(
+        crate::state::overtime_adjustments::OvertimeAdjustment {
+            id: 1, date: format!("{year}-03-01"), hours: 2.0, reason: "Bonus".into(),
+        }
+    );
+    app.team_settings.members.push(m);
+
+    let _ = app.update_team(TeamMsg::AdjDelete(9, 1));
+
+    assert!(app.team_settings.member(9).unwrap().overtime_adjustments.adjustments_for(year).is_empty());
+}

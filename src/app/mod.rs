@@ -49,7 +49,7 @@ pub use settings::SettingsMsg;
 pub use settings::{SettingsFormState, ValidatedProfile, ValidatedCarryover, TemplateFormState};
 pub use project_tracking::ProjectTrackingMsg;
 pub use project_tracking::{ProjectTrackingPageState, BudgetSummary, BudgetForm};
-pub use team::TeamPageState;
+pub use team::{TeamMsg, TeamMemberForm, TeamMemberStats, TeamPageState};
 
 #[cfg(test)]
 mod tests;
@@ -230,6 +230,9 @@ pub enum Message {
 
     // Project Tracking
     ProjectTracking(ProjectTrackingMsg),
+
+    // Team
+    Team(TeamMsg),
 
     // Window lifecycle
     WindowIdReceived(Option<window::Id>),
