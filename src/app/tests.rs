@@ -1524,6 +1524,117 @@ fn page_changed_to_billable_still_works_when_not_impersonating() {
     assert_eq!(app.page, Page::Billable);
 }
 
+// ── Task 3: Day page re-scoping + entry-mutation guards ──────────────────────
+
+#[test]
+fn load_entries_task_is_noop_without_client_regardless_of_impersonation() {
+    // load_entries_task always short-circuits on `self.client.is_none()`
+    // (test_instance has no client) — this documents that the
+    // impersonation user_id swap is reached only once a client exists,
+    // and that swapping it doesn't panic or change this early-return.
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.impersonating = Some(9);
+    let _ = app.load_entries_task();
+}
+
+#[test]
+fn entry_show_form_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+
+    let _ = app.update_entries(EntryMsg::ShowForm);
+
+    assert!(app.entry_form.is_none());
+}
+
+#[test]
+fn entry_edit_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    app.entries = vec![make_entry(1, 10, 1, 5.0, false)];
+
+    let _ = app.update_entries(EntryMsg::Edit(1));
+
+    assert!(app.entry_form.is_none());
+}
+
+#[test]
+fn entry_submit_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    app.entry_form = Some(EntryForm::new());
+    let before = app.entries.clone();
+
+    let _ = app.update_entries(EntryMsg::Submit);
+
+    assert_eq!(app.entries.len(), before.len());
+    assert!(app.entry_form.is_some(), "guard must return before touching the form");
+}
+
+#[test]
+fn entry_delete_request_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+
+    let _ = app.update_entries(EntryMsg::DeleteRequest(1));
+
+    assert!(app.pending_delete.is_none());
+}
+
+#[test]
+fn entry_delete_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    app.entries = vec![make_entry(1, 10, 1, 5.0, false)];
+
+    let _ = app.update_entries(EntryMsg::Delete(1));
+
+    assert_eq!(app.entries.len(), 1, "entry must not be locally removed pre-confirm while impersonating");
+}
+
+#[test]
+fn entry_timer_start_stop_no_op_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    app.entries = vec![make_entry(1, 10, 1, 5.0, false)];
+
+    let _ = app.update_entries(EntryMsg::TimerStart(1));
+    let _ = app.update_entries(EntryMsg::TimerStop(1));
+
+    assert!(!app.entries[0].is_running);
+}
+
+#[test]
+fn entry_fill_remaining_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    app.entry_form = Some(EntryForm::new());
+
+    let _ = app.update_entries(EntryMsg::FillRemaining);
+
+    assert!(app.entry_form.as_ref().unwrap().hours_input.is_empty());
+}
+
+#[test]
+fn entry_show_form_works_when_not_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = None;
+
+    let _ = app.update_entries(EntryMsg::ShowForm);
+
+    assert!(app.entry_form.is_some());
+}
+
 #[test]
 fn carryover_delete_removes_entry() {
     let dir = tempfile::tempdir().unwrap();

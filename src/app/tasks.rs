@@ -114,7 +114,7 @@ impl EasyHarvest {
         };
         let date = self.current_date.format("%Y-%m-%d").to_string();
         let r#gen = self.entries_gen;
-        let user_id = self.harvest_user_id;
+        let user_id = self.impersonating.or(self.harvest_user_id);
         Task::perform(
             async move {
                 client

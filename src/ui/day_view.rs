@@ -21,17 +21,18 @@ use super::{
 
 pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
     let header = date_header(state);
-    let hours_bar = hours_summary(state);
-    let work_strip = work_day_strip(state);
     let body: Element<Message> = if state.entry_form.is_some() {
         entry_form_view(state)
     } else {
         entry_list(state)
     };
 
-    let mut col = column![header, hours_bar, work_strip]
-        .spacing(0)
-        .width(Length::Fill);
+    let mut col = column![header].spacing(0).width(Length::Fill);
+
+    if state.impersonating.is_none() {
+        col = col.push(hours_summary(state));
+        col = col.push(work_day_strip(state));
+    }
 
     if state.date_picker.open {
         col = col.push(date_picker_view(state));
@@ -501,7 +502,7 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
     )
     .style(super::accent_btn_style)
     .padding([8, 18])
-    .on_press(Message::Entry(Box::new(EntryMsg::ShowForm)));
+    .on_press_maybe(state.impersonating.is_none().then_some(Message::Entry(Box::new(EntryMsg::ShowForm))));
 
     let header = container(
         row![
@@ -549,7 +550,7 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
         let rows: Vec<Element<Message>> = state
             .entries
             .iter()
-            .map(|e| entry_row(e, pending))
+            .map(|e| entry_row(e, pending, state.impersonating.is_some()))
             .collect();
         scrollable(
             column(rows).spacing(LIST_ROW_SPACING).width(Length::Fill).padding([0, 2]),
@@ -565,7 +566,7 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
         .into()
 }
 
-fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Message> {
+fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>, impersonating: bool) -> Element<'_, Message> {
     let locked_indicator: Element<Message> = if entry.is_billed {
         status_badge("Billed", TEXT_MUTED)
     } else if entry.approval_status.as_deref() == Some("submitted") {
@@ -608,11 +609,11 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
 
     let timer_btn: Element<Message> = if entry.is_running {
         compact_ghost_btn("■  Stop", SUCCESS)
-            .on_press(Message::Entry(Box::new(EntryMsg::TimerStop(entry.id))))
+            .on_press_maybe((!impersonating).then_some(Message::Entry(Box::new(EntryMsg::TimerStop(entry.id)))))
             .into()
     } else if !entry.is_locked && entry.approval_status.as_deref() != Some("submitted") {
         compact_ghost_btn("▶  Start", TEXT_MUTED)
-            .on_press(Message::Entry(Box::new(EntryMsg::TimerStart(entry.id))))
+            .on_press_maybe((!impersonating).then_some(Message::Entry(Box::new(EntryMsg::TimerStart(entry.id)))))
             .into()
     } else {
         Space::new().into()
@@ -643,10 +644,10 @@ fn entry_row(entry: &TimeEntry, pending_delete: Option<i64>) -> Element<'_, Mess
             timer_btn,
             Space::new().width(2).height(2),
             compact_ghost_btn("Edit", TEXT_MUTED)
-                .on_press(Message::Entry(Box::new(EntryMsg::Edit(entry.id)))),
+                .on_press_maybe((!impersonating).then_some(Message::Entry(Box::new(EntryMsg::Edit(entry.id))))),
             Space::new().width(2).height(2),
             compact_ghost_btn("Delete", DANGER)
-                .on_press(Message::Entry(Box::new(EntryMsg::DeleteRequest(entry.id)))),
+                .on_press_maybe((!impersonating).then_some(Message::Entry(Box::new(EntryMsg::DeleteRequest(entry.id))))),
         ]
         .align_y(Alignment::Center)
         .into()

@@ -133,11 +133,13 @@ impl EasyHarvest {
             }
 
             EntryMsg::ShowForm => {
+                if self.impersonating.is_some() { return Task::none(); }
                 self.entry_form = Some(EntryForm::new());
                 Task::none()
             }
 
             EntryMsg::Edit(id) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(entry) = self.entries.iter().find(|e| e.id == id) {
                     self.entry_form = Some(EntryForm::for_entry(entry, &self.cached_project_options));
                 }
@@ -145,11 +147,13 @@ impl EasyHarvest {
             }
 
             EntryMsg::CancelForm => {
+                if self.impersonating.is_some() { return Task::none(); }
                 self.entry_form = None;
                 Task::none()
             }
 
             EntryMsg::ProjectQueryChanged(q) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(form) = &mut self.entry_form {
                     form.project_query = q;
                     form.selected_project_idx = None;
@@ -159,6 +163,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::ProjectSelected(idx) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(form) = &mut self.entry_form {
                     let options = self.cached_project_options.clone();
                     if let Some(opt) = options.get(idx) {
@@ -173,6 +178,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::HoursChanged(h) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(form) = &mut self.entry_form {
                     form.hours_input = h;
                 }
@@ -180,6 +186,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::NotesChanged(n) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(form) = &mut self.entry_form {
                     form.notes_input = n;
                 }
@@ -187,14 +194,17 @@ impl EasyHarvest {
             }
 
             EntryMsg::FocusHours => {
+                if self.impersonating.is_some() { return Task::none(); }
                 iced::widget::operation::focus(iced::widget::Id::new("form_hours"))
             }
 
             EntryMsg::FocusNotes => {
+                if self.impersonating.is_some() { return Task::none(); }
                 iced::widget::operation::focus(iced::widget::Id::new("form_notes"))
             }
 
             EntryMsg::Submit => {
+                if self.impersonating.is_some() { return Task::none(); }
                 let Some(form) = &self.entry_form else {
                     return Task::none();
                 };
@@ -328,16 +338,19 @@ impl EasyHarvest {
             }
 
             EntryMsg::DeleteRequest(id) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 self.pending_delete = Some(id);
                 Task::none()
             }
 
             EntryMsg::DeleteCancel => {
+                if self.impersonating.is_some() { return Task::none(); }
                 self.pending_delete = None;
                 Task::none()
             }
 
             EntryMsg::Delete(id) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 self.pending_delete = None;
                 let Some(client) = self.client.clone() else {
                     return Task::none();
@@ -363,6 +376,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::TimerStart(id) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 let Some(client) = self.client.clone() else {
                     return Task::none();
                 };
@@ -373,6 +387,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::TimerStop(id) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 let Some(client) = self.client.clone() else {
                     return Task::none();
                 };
@@ -426,6 +441,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::FillRemaining => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if self.entry_form.is_none() {
                     return Task::none();
                 }
@@ -458,6 +474,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::TemplateApply(idx) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 let Some(tpl) = self.templates.entries.get(idx).cloned() else {
                     return Task::none();
                 };
