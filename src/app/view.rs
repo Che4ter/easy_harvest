@@ -16,7 +16,7 @@ impl EasyHarvest {
             Page::Team => team_view::view(self),
         };
 
-        let nav = nav_bar(&self.page, self.settings.team_lead_mode);
+        let nav = nav_bar(&self.page, self.settings.team_lead_mode, self.impersonating.is_some());
 
         let mut col = column![nav].spacing(0).height(iced::Length::Fill);
 
@@ -50,9 +50,19 @@ impl EasyHarvest {
 
 // ── Nav bar ───────────────────────────────────────────────────────────────────
 
-fn nav_bar(current: &Page, team_lead_mode: bool) -> Element<'static, Message> {
-    let btn = |label: &'static str, page: Page, active: bool| {
-        let style = if active {
+fn nav_bar(current: &Page, team_lead_mode: bool, impersonating: bool) -> Element<'static, Message> {
+    let btn = |label: &'static str, page: Page, active: bool, disabled: bool| {
+        let style = if disabled {
+            button::Style {
+                background: Some(iced::Background::Color(SURFACE_RAISED)),
+                text_color: Color { a: 0.35, ..TEXT_MUTED },
+                border: iced::Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        } else if active {
             button::Style {
                 background: Some(iced::Background::Color(ACCENT)),
                 text_color: Color::WHITE,
@@ -80,7 +90,7 @@ fn nav_bar(current: &Page, team_lead_mode: bool) -> Element<'static, Message> {
         )
         .style(move |_, _| style)
         .padding([6, 14])
-        .on_press(Message::Nav(NavMsg::PageChanged(page)))
+        .on_press_maybe((!disabled).then_some(Message::Nav(NavMsg::PageChanged(page))))
     };
 
     let settings_active = *current == Page::Settings;
@@ -108,17 +118,17 @@ fn nav_bar(current: &Page, team_lead_mode: bool) -> Element<'static, Message> {
     .on_press(Message::Nav(NavMsg::PageChanged(Page::Settings)));
 
     let mut nav_row = row![
-        btn("Day", Page::Day, *current == Page::Day),
-        btn("Vacation", Page::Vacation, *current == Page::Vacation),
-        btn("Overtime", Page::Stats, *current == Page::Stats),
-        btn("Billable", Page::Billable, *current == Page::Billable),
-        btn("Projects", Page::ProjectTracking, *current == Page::ProjectTracking),
+        btn("Day", Page::Day, *current == Page::Day, false),
+        btn("Vacation", Page::Vacation, *current == Page::Vacation, false),
+        btn("Overtime", Page::Stats, *current == Page::Stats, false),
+        btn("Billable", Page::Billable, *current == Page::Billable, impersonating),
+        btn("Projects", Page::ProjectTracking, *current == Page::ProjectTracking, impersonating),
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center);
 
     if team_lead_mode {
-        nav_row = nav_row.push(btn("Team", Page::Team, *current == Page::Team));
+        nav_row = nav_row.push(btn("Team", Page::Team, *current == Page::Team, false));
     }
 
     nav_row = nav_row.push(Space::new().width(iced::Length::Fill));

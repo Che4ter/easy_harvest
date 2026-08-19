@@ -1485,6 +1485,46 @@ fn impersonated_member_looks_up_by_id() {
 }
 
 #[test]
+fn page_changed_to_billable_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    app.page = Page::Day;
+    let before_gen = app.billable_gen;
+
+    let _ = app.update(Message::Nav(NavMsg::PageChanged(Page::Billable)));
+
+    assert_eq!(app.page, Page::Day, "navigation to Billable must be rejected while impersonating");
+    assert_eq!(app.billable_gen, before_gen);
+}
+
+#[test]
+fn page_changed_to_project_tracking_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    app.page = Page::Day;
+    let before_gen = app.project_tracking_gen;
+
+    let _ = app.update(Message::Nav(NavMsg::PageChanged(Page::ProjectTracking)));
+
+    assert_eq!(app.page, Page::Day);
+    assert_eq!(app.project_tracking_gen, before_gen);
+}
+
+#[test]
+fn page_changed_to_billable_still_works_when_not_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = None;
+    app.page = Page::Day;
+
+    let _ = app.update(Message::Nav(NavMsg::PageChanged(Page::Billable)));
+
+    assert_eq!(app.page, Page::Billable);
+}
+
+#[test]
 fn carryover_delete_removes_entry() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());

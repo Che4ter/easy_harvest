@@ -314,6 +314,11 @@ impl EasyHarvest {
     fn update_navigation(&mut self, msg: NavMsg) -> Task<Message> {
         match msg {
             NavMsg::PageChanged(page) => {
+                if self.impersonating.is_some()
+                    && matches!(page, Page::Billable | Page::ProjectTracking)
+                {
+                    return Task::none();
+                }
                 // M4-F4: ensure the date-picker popup is always dismissed when the
                 // user navigates to a new page — it is not visible on other pages.
                 self.date_picker.open = false;
