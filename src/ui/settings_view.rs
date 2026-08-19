@@ -7,8 +7,8 @@ use crate::app::{
     FONT_SEMIBOLD, SUCCESS, SURFACE, TEXT_MUTED, TEXT_PRIMARY,
 };
 use super::{
-    caption, card_style, delete_chip_btn, dropdown_container_style, field_label,
-    input_style, month_abbr, nav_arrow_btn, outline_btn, outline_btn_sm,
+    caption, card_style, card_style_bordered, delete_chip_btn, dropdown_container_style,
+    field_label, input_style, month_abbr, nav_arrow_btn, outline_btn, outline_btn_sm,
     outline_btn_style, primary_btn, section_heading, suggestion_btn_style,
     toggle_active_style, toggle_inactive_style,
     PAGE_PADDING, SECTION_GAP, LIST_ROW_SPACING,
@@ -30,9 +30,14 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         holidays_section(state),
         holiday_tasks_section(state),
         templates_section(state),
-        team_lead_mode_section(state),
     ]
     .spacing(SECTION_GAP);
+
+    if state.harvest_user_is_admin && !state.settings.team_lead_mode && !state.settings.admin_hint_dismissed {
+        sections = sections.push(admin_hint_section());
+    }
+
+    sections = sections.push(team_lead_mode_section(state));
 
     if state.settings.team_lead_mode {
         sections = sections.push(team_management_section(state));
@@ -690,6 +695,36 @@ fn data_dir_section(state: &EasyHarvest) -> Element<'_, Message> {
 
 // ── Team Lead Mode toggle ──────────────────────────────────────────────────
 
+/// One-time hint shown when the connected account has Harvest Administrator
+/// access but Team Lead Mode is off — suggests turning it on. Dismissible;
+/// the dismissal is remembered (`Settings.admin_hint_dismissed`) so it never
+/// re-prompts. Only rendered when the caller has already checked
+/// `harvest_user_is_admin && !team_lead_mode && !admin_hint_dismissed`.
+fn admin_hint_section() -> Element<'static, Message> {
+    let enable_btn = primary_btn("Enable Team Lead Mode")
+        .on_press(Message::Settings(SettingsMsg::TeamLeadModeToggle));
+    let dismiss_btn = outline_btn_sm("Dismiss")
+        .on_press(Message::Settings(SettingsMsg::DismissAdminHint));
+
+    container(
+        column![
+            field_label("You have Harvest Administrator access"),
+            caption(
+                "That usually means you lead a team. Team Lead Mode adds a \
+                 roster you can track overtime and vacation for, and lets \
+                 you pick teammates from your company's Harvest directory \
+                 instead of typing their user ID by hand.",
+            ),
+            row![enable_btn, dismiss_btn].spacing(8),
+        ]
+        .spacing(8),
+    )
+    .style(|_| card_style_bordered(ACCENT))
+    .padding(12)
+    .width(Length::Fill)
+    .into()
+}
+
 fn team_lead_mode_section(state: &EasyHarvest) -> Element<'_, Message> {
     let enabled = state.settings.team_lead_mode;
     let btn_label = if enabled { "Enabled" } else { "Disabled" };
@@ -769,22 +804,112 @@ fn team_management_section(state: &EasyHarvest) -> Element<'_, Message> {
         column(member_cards).spacing(SECTION_GAP).into()
     };
 
-    container(
-        column![
-            section_heading("Team"),
-            caption(
-                "Add teammates by name and their numeric Harvest user ID \
-                 (found in their profile URL in Harvest's web UI).",
-            ),
-            add_row,
-            members_list,
-        ]
-        .spacing(SECTION_GAP),
-    )
+    let caption_text = if state.harvest_user_is_admin {
+        "Search your company's Harvest directory below, or add teammates \
+         manually by name and their numeric Harvest user ID (found in \
+         their profile URL in Harvest's web UI)."
+    } else {
+        "Add teammates by name and their numeric Harvest user ID \
+         (found in their profile URL in Harvest's web UI)."
+    };
+
+    let mut content = column![
+        section_heading("Team"),
+        caption(caption_text),
+    ];
+
+    if state.harvest_user_is_admin {
+        content = content.push(roster_picker_el(state));
+    }
+
+    content = content.push(add_row);
+    content = content.push(members_list);
+
+    container(content.spacing(SECTION_GAP))
     .style(card_style)
     .padding(12)
     .width(Length::Fill)
     .into()
+}
+
+/// Type-to-filter picker over the company Harvest directory
+/// (`state.team.directory`), used to fill the add-member name/ID fields
+/// without looking up a numeric Harvest user ID by hand. Admin-only —
+/// callers must gate rendering on `state.harvest_user_is_admin`.
+fn roster_picker_el(state: &EasyHarvest) -> Element<'_, Message> {
+    let refresh_btn = outline_btn_sm(if state.team.directory_loading { "Loading…" } else { "↺ Refresh directory" })
+        .on_press_maybe(
+            (!state.team.directory_loading).then_some(Message::Team(TeamMsg::DirectoryRefresh)),
+        );
+
+    let search_row = row![
+        text_input("Search team directory (name or email)…", &state.team.directory_query)
+            .on_input(|v| Message::Team(TeamMsg::DirectoryQueryChanged(v)))
+            .size(13)
+            .padding([8, 10])
+            .style(input_style)
+            .width(Length::Fill),
+        refresh_btn,
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let status_el: Element<Message> = if let Some(err) = &state.team.directory_error {
+        text(format!("Could not load directory: {err}"))
+            .font(FONT_REGULAR).size(12).color(DANGER).into()
+    } else if state.team.directory_loading && state.team.directory.is_empty() {
+        text("Loading company directory…").font(FONT_REGULAR).size(12).color(TEXT_MUTED).into()
+    } else {
+        Space::new().into()
+    };
+
+    let query = state.team.directory_query.trim().to_lowercase();
+    let suggestions_el: Element<Message> = if !query.is_empty() {
+        let existing_ids: std::collections::HashSet<i64> =
+            state.team_settings.members.iter().map(|m| m.harvest_user_id).collect();
+        let items: Vec<Element<Message>> = state
+            .team
+            .directory
+            .iter()
+            .filter(|u| u.is_active && !existing_ids.contains(&u.id))
+            .filter(|u| {
+                let full_name = format!("{} {}", u.first_name, u.last_name).to_lowercase();
+                full_name.contains(&query) || u.email.to_lowercase().contains(&query)
+            })
+            .take(8)
+            .map(|u| {
+                let user_id = u.id;
+                button(
+                    column![
+                        text(format!("{} {}", u.first_name, u.last_name))
+                            .font(FONT_MEDIUM).size(13).color(TEXT_PRIMARY),
+                        caption(u.email.clone()),
+                    ]
+                    .spacing(1),
+                )
+                .style(suggestion_btn_style)
+                .padding([8, 12])
+                .width(Length::Fill)
+                .on_press(Message::Team(TeamMsg::DirectoryPick(user_id)))
+                .into()
+            })
+            .collect();
+
+        if items.is_empty() {
+            text("No matching, not-yet-added active users.")
+                .font(FONT_REGULAR).size(12).color(TEXT_MUTED).into()
+        } else {
+            container(column(items).spacing(1))
+                .style(dropdown_container_style)
+                .padding(4)
+                .width(Length::Fill)
+                .into()
+        }
+    } else {
+        Space::new().into()
+    };
+
+    column![search_row, status_el, suggestions_el].spacing(4).into()
 }
 
 fn team_member_settings_card<'a>(
