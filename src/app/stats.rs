@@ -107,11 +107,16 @@ impl EasyHarvest {
                         // Persist derived carryover into settings.json so the next year
                         // picks it up automatically.  Past years are immutable so this
                         // only needs to run once; existing (manual) entries are preserved.
+                        // Skip entirely while impersonating: the loaded balance/holidays are
+                        // the impersonated member's, not the lead's, and must never be written
+                        // into the lead's own settings.json.
                         let year = self.overtime_year;
                         let after_employment = self.settings.first_work_day
                             .map(|d| year >= d.year())
                             .unwrap_or(true);
-                        if year < Local::now().naive_local().date().year() && after_employment {
+                        if self.impersonating.is_none()
+                            && year < Local::now().naive_local().date().year()
+                            && after_employment {
                             let next = year + 1;
                             if !self.settings.carryover.contains_key(&next)
                                 && let (Some(bal), Some(hols)) =
@@ -139,31 +144,37 @@ impl EasyHarvest {
 
             // ── Adjustment form ─────────────────────────────────────────────
             StatsMsg::ShowAdjForm => {
+                if self.impersonating.is_some() { return Task::none(); }
                 self.overtime_adj_form = Some(OvertimeAdjustmentForm::default());
                 Task::none()
             }
 
             StatsMsg::HideAdjForm => {
+                if self.impersonating.is_some() { return Task::none(); }
                 self.overtime_adj_form = None;
                 Task::none()
             }
 
             StatsMsg::AdjDateChanged(v) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(f) = &mut self.overtime_adj_form { f.date_input = v; f.error = None; }
                 Task::none()
             }
 
             StatsMsg::AdjHoursChanged(v) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(f) = &mut self.overtime_adj_form { f.hours_input = v; f.error = None; }
                 Task::none()
             }
 
             StatsMsg::AdjReasonChanged(v) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(f) = &mut self.overtime_adj_form { f.reason_input = v; f.error = None; }
                 Task::none()
             }
 
             StatsMsg::AdjSubmit => {
+                if self.impersonating.is_some() { return Task::none(); }
                 let Some(form) = &self.overtime_adj_form else { return Task::none(); };
 
                 let validated = match form.validate(self.overtime_year) {
@@ -199,6 +210,7 @@ impl EasyHarvest {
             }
 
             StatsMsg::AdjDelete(id) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 let year = self.overtime_year;
                 // Stash the item before removing it so we can roll back on save failure.
                 let removed: Vec<_> = self.overtime_adjustments

@@ -208,7 +208,11 @@ fn build_monthly_breakdown(state: &EasyHarvest) -> Element<'_, Message> {
 }
 
 fn build_adjustments_section(state: &EasyHarvest, year: i32) -> Element<'_, Message> {
-    let adjustments = state.overtime_adjustments.adjustments_for(year);
+    let adjustments = match state.impersonated_member() {
+        Some(member) => member.overtime_adjustments.adjustments_for(year),
+        None => state.overtime_adjustments.adjustments_for(year),
+    };
+    let impersonating = state.impersonating.is_some();
 
     let toggle_btn: Element<Message> = if state.overtime_adj_form.is_some() {
         Element::from(
@@ -218,7 +222,7 @@ fn build_adjustments_section(state: &EasyHarvest, year: i32) -> Element<'_, Mess
     } else {
         Element::from(
             outline_btn_sm("+ Add Adjustment")
-                .on_press(Message::Stats(StatsMsg::ShowAdjForm)),
+                .on_press_maybe((!impersonating).then_some(Message::Stats(StatsMsg::ShowAdjForm))),
         )
     };
 
@@ -247,7 +251,7 @@ fn build_adjustments_section(state: &EasyHarvest, year: i32) -> Element<'_, Mess
     } else {
         let rows: Vec<Element<Message>> = adjustments
             .iter()
-            .map(|adj| adjustment_row(adj))
+            .map(|adj| adjustment_row(adj, impersonating))
             .collect();
         content = content.push(column(rows).spacing(4));
     }
@@ -257,7 +261,7 @@ fn build_adjustments_section(state: &EasyHarvest, year: i32) -> Element<'_, Mess
         .into()
 }
 
-fn adjustment_row(adj: &crate::state::overtime_adjustments::OvertimeAdjustment) -> Element<'_, Message> {
+fn adjustment_row(adj: &crate::state::overtime_adjustments::OvertimeAdjustment, impersonating: bool) -> Element<'_, Message> {
     let sign = if adj.hours >= 0.0 { "+" } else { "" };
     let color = if adj.hours >= 0.0 { SUCCESS } else { DANGER };
 
@@ -285,7 +289,7 @@ fn adjustment_row(adj: &crate::state::overtime_adjustments::OvertimeAdjustment) 
                 .color(TEXT_PRIMARY)
                 .width(Length::Fill),
             outline_btn_sm("Delete")
-                .on_press(Message::Stats(StatsMsg::AdjDelete(id))),
+                .on_press_maybe((!impersonating).then_some(Message::Stats(StatsMsg::AdjDelete(id)))),
         ]
         .spacing(8)
         .align_y(Alignment::Center),

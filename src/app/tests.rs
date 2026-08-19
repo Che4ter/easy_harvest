@@ -1635,6 +1635,116 @@ fn entry_show_form_works_when_not_impersonating() {
     assert!(app.entry_form.is_some());
 }
 
+// ── Task 4: Stats page re-scoping / overtime-adjustment guards ────────────────
+
+#[test]
+fn stats_config_resolution_uses_member_when_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.settings.total_weekly_hours = 40.0;
+    let mut member = team_member(9, "Sam");
+    member.work_percentage = 0.5;
+    member.total_holiday_days_per_year = 20;
+    app.team_settings.members.push(member);
+    app.impersonating = Some(9);
+
+    let m = app.impersonated_member().expect("member must resolve");
+    assert_eq!(m.expected_hours_per_day(app.settings.total_weekly_hours), 4.0);
+
+    app.impersonating = None;
+    assert!(app.impersonated_member().is_none());
+}
+
+#[test]
+fn stats_show_adj_form_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+
+    let _ = app.update_stats(StatsMsg::ShowAdjForm);
+
+    assert!(app.overtime_adj_form.is_none());
+}
+
+#[test]
+fn stats_adj_submit_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    app.overtime_adj_form = Some(OvertimeAdjustmentForm {
+        date_input: format!("01.06.{}", app.overtime_year),
+        hours_input: "2".into(),
+        reason_input: "test".into(),
+        error: None,
+    });
+    let before = app.overtime_adjustments.adjustments_for(app.overtime_year).len();
+
+    let _ = app.update_stats(StatsMsg::AdjSubmit);
+
+    assert_eq!(app.overtime_adjustments.adjustments_for(app.overtime_year).len(), before);
+}
+
+#[test]
+fn stats_adj_delete_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let year = app.overtime_year;
+    let id = app.overtime_adjustments.next_id;
+    app.overtime_adjustments.next_id += 1;
+    app.overtime_adjustments.adjustments_for_mut(year).push(
+        crate::state::overtime_adjustments::OvertimeAdjustment {
+            id, date: format!("{year}-06-01"), hours: 2.0, reason: "test".into(),
+        },
+    );
+    app.impersonating = Some(9);
+
+    let _ = app.update_stats(StatsMsg::AdjDelete(id));
+
+    assert_eq!(app.overtime_adjustments.adjustments_for(year).len(), 1);
+}
+
+#[test]
+fn stats_show_adj_form_works_when_not_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = None;
+
+    let _ = app.update_stats(StatsMsg::ShowAdjForm);
+
+    assert!(app.overtime_adj_form.is_some());
+}
+
+/// `StatsMsg::Loaded` derives next-year carryover from the loaded balance and
+/// persists it into `self.settings` — but while impersonating, the loaded
+/// balance belongs to the impersonated member, not the lead. That
+/// persistence must be skipped entirely (though the member's stats must
+/// still populate `year_balance`/`holiday_stats` for display).
+#[test]
+fn stats_loaded_does_not_persist_carryover_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    // test_instance sets overtime_year = 2025 and first_work_day = None; the
+    // real wall-clock year is > 2025, so the persistence branch's year/
+    // after_employment conditions are satisfied and only the impersonation
+    // guard is what should prevent the write.
+    app.impersonating = Some(9);
+    let r#gen = app.stats_gen;
+
+    let mut balance = zero_balance();
+    balance.total_balance = 12345.0; // distinctive value that must never reach lead settings
+
+    let _ = app.update_stats(StatsMsg::Loaded(
+        r#gen,
+        Ok((balance, zero_holiday_stats(), Vec::new())),
+    ));
+
+    assert!(app.year_balance.is_some(), "member's stats must still populate for display");
+    assert!(
+        !app.settings.carryover.contains_key(&2026),
+        "member's balance must never be persisted into the lead's own settings.json"
+    );
+}
+
 #[test]
 fn carryover_delete_removes_entry() {
     let dir = tempfile::tempdir().unwrap();

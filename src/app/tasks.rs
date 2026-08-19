@@ -170,15 +170,29 @@ impl EasyHarvest {
         let from = format!("{year}-01-01");
         let to = format!("{year}-12-31");
         let balance_end = balance_end_for_year(year, today);
-        let expected_per_day = self.settings.expected_hours_per_day();
+        let (user_id, expected_per_day, carryover, holiday_task_ids, total_holiday_days, first_work_day, adj_total) =
+            match self.impersonated_member() {
+                Some(member) => (
+                    Some(member.harvest_user_id),
+                    member.expected_hours_per_day(self.settings.total_weekly_hours),
+                    member.overtime_carryover_for(year),
+                    member.holiday_task_ids.clone(),
+                    member.effective_holiday_days_for(year, self.settings.total_weekly_hours),
+                    member.first_work_day,
+                    member.overtime_adjustments.adjustments_total(year),
+                ),
+                None => (
+                    self.harvest_user_id,
+                    self.settings.expected_hours_per_day(),
+                    self.settings.overtime_carryover_for(year),
+                    self.settings.holiday_task_ids.clone(),
+                    self.settings.effective_holiday_days_for(year),
+                    self.settings.first_work_day,
+                    self.overtime_adjustments.adjustments_total(year),
+                ),
+            };
         let public_holidays = swiss_public_holidays(year);
-        let carryover = self.settings.overtime_carryover_for(year);
-        let holiday_task_ids = self.settings.holiday_task_ids.clone();
-        let total_holiday_days = self.settings.effective_holiday_days_for(year);
-        let first_work_day = self.settings.first_work_day;
-        let adj_total = self.overtime_adjustments.adjustments_total(year);
         let r#gen = self.stats_gen;
-        let user_id = self.harvest_user_id;
 
         Task::perform(
             async move {
