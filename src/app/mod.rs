@@ -548,12 +548,14 @@ impl EasyHarvest {
         self.impersonating.and_then(|id| self.team_settings.member(id))
     }
 
-    /// Whose Harvest data every user-scoped fetch targets: the impersonated
-    /// member when impersonating, otherwise the signed-in user. This is the
-    /// single point where impersonation redirects data loading, so it lives
-    /// here (next to `impersonated_member`) and is unit-tested directly —
-    /// its call sites in `tasks.rs` sit behind a `client.is_none()` early
-    /// return that no unit test can get past.
+    /// Whose Harvest data a user-scoped fetch targets: the impersonated
+    /// member when impersonating, otherwise the signed-in user. Used by
+    /// `load_entries_task` and `load_vacation_task` in `tasks.rs` (Stats
+    /// resolves this independently via `impersonated_member()`, since it
+    /// needs the whole `TeamMember`, not just the id). Lives here (next to
+    /// `impersonated_member`) and is unit-tested directly — its call sites
+    /// sit behind a `client.is_none()` early return that no unit test can
+    /// get past.
     fn effective_user_id(&self) -> Option<i64> {
         self.impersonating.or(self.harvest_user_id)
     }
