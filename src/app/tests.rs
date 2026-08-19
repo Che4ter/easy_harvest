@@ -2108,3 +2108,22 @@ fn vacation_entries_created_no_ops_while_impersonating() {
 
     assert!(app.vacation.entries.is_empty());
 }
+
+// Symmetric to vacation_entries_created_no_ops_while_impersonating: a
+// lead-initiated DeleteEntry can still be in flight (EntryDeleted not yet
+// delivered) when the lead starts impersonating a team member. Without a
+// guard here, the response would run retain()/recompute_vacation_summary()
+// against the impersonated member's displayed vacation.entries.
+#[test]
+fn vacation_entry_deleted_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.vacation.year = 2025;
+    let entry = make_entry(1, 1, 1, 8.0, false);
+    app.vacation.entries = vec![entry];
+    app.impersonating = Some(9);
+
+    let _ = app.update_vacation(VacationMsg::EntryDeleted(Ok(1)));
+
+    assert_eq!(app.vacation.entries.len(), 1);
+}

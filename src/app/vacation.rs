@@ -310,6 +310,7 @@ impl EasyHarvest {
             }
 
             VacationMsg::EntryDeleted(result) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 match result {
                     Ok(id) => {
                         self.vacation.entries.retain(|e| e.id != id);
