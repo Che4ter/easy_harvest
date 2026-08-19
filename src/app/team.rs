@@ -26,6 +26,7 @@ pub struct TeamPageState {
     pub stats: HashMap<i64, TeamMemberStats>,
     pub adjustment_forms: HashMap<i64, OvertimeAdjustmentForm>,
     pub first_work_day_inputs: HashMap<i64, String>,
+    pub work_percentage_inputs: HashMap<i64, String>,
     pub r#gen: u64,
 
     /// Company user directory for the "add member" roster picker.
@@ -59,6 +60,8 @@ pub enum TeamMsg {
     RemoveMember(i64),
     FirstWorkDayInputChanged(i64, String),
     FirstWorkDaySave(i64),
+    WorkPercentageInputChanged(i64, String),
+    WorkPercentageSave(i64),
 
     /// Load the company user directory if it isn't already loaded this
     /// session, preferring a fresh disk cache over a live fetch. No-op for
@@ -172,7 +175,7 @@ impl EasyHarvest {
                 self.team_settings.members.push(TeamMember {
                     harvest_user_id,
                     display_name: name,
-                    expected_hours_per_day: self.settings.expected_hours_per_day(),
+                    work_percentage: 1.0,
                     total_holiday_days_per_year: self.settings.total_holiday_days_per_year,
                     holiday_task_ids: self.settings.holiday_task_ids.clone(),
                     first_work_day: None,
@@ -193,6 +196,7 @@ impl EasyHarvest {
                 self.team.stats.remove(&id);
                 self.team.adjustment_forms.remove(&id);
                 self.team.first_work_day_inputs.remove(&id);
+                self.team.work_percentage_inputs.remove(&id);
                 self.team.r#gen += 1;
                 self.save_team_or_warn();
                 Task::none()
@@ -228,6 +232,27 @@ impl EasyHarvest {
                 self.update_team(TeamMsg::CarryoverSyncStart(id))
             }
 
+            TeamMsg::WorkPercentageInputChanged(id, v) => {
+                self.team.work_percentage_inputs.insert(id, v);
+                Task::none()
+            }
+
+            TeamMsg::WorkPercentageSave(id) => {
+                let raw = self.team.work_percentage_inputs.get(&id).cloned().unwrap_or_default();
+                let percentage = match raw.trim().replace(',', ".").parse::<f64>() {
+                    Ok(v) if v > 0.0 && v <= 100.0 => v / 100.0,
+                    _ => {
+                        self.error_banner = Some("Invalid work percentage (1–100).".into());
+                        return Task::none();
+                    }
+                };
+                let Some(member) = self.team_settings.member_mut(id) else { return Task::none(); };
+                member.work_percentage = percentage;
+                self.save_team_or_warn();
+                self.team.work_percentage_inputs.remove(&id);
+                Task::none()
+            }
+
             TeamMsg::CarryoverDelete(id, year) => {
                 if let Some(member) = self.team_settings.member_mut(id) {
                     member.carryover.remove(&year);
@@ -260,13 +285,14 @@ impl EasyHarvest {
 
             TeamMsg::CarryoverSyncLoaded(id, year, result) => {
                 let next = year + 1;
+                let lead_weekly_hours = self.settings.total_weekly_hours;
                 if let Some(member) = self.team_settings.member_mut(id) {
                     match result {
                         Ok((balance, holidays)) => {
                             let user_defined =
                                 member.carryover.get(&next).is_some_and(|c| c.is_user_defined);
                             if !user_defined {
-                                let epd = member.expected_hours_per_day;
+                                let epd = member.expected_hours_per_day(lead_weekly_hours);
                                 member.carryover.insert(next, YearCarryover {
                                     overtime_hours: balance.total_balance,
                                     holiday_hours: holidays.days_remaining * epd,

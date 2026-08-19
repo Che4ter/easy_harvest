@@ -282,11 +282,11 @@ impl EasyHarvest {
         let from = format!("{year}-01-01");
         let to = format!("{year}-12-31");
         let balance_end = balance_end_for_year(year, today);
-        let expected_per_day = member.expected_hours_per_day;
+        let expected_per_day = member.expected_hours_per_day(self.settings.total_weekly_hours);
         let public_holidays = swiss_public_holidays(year);
         let carryover = member.overtime_carryover_for(year);
         let holiday_task_ids = member.holiday_task_ids.clone();
-        let total_holiday_days = member.effective_holiday_days_for(year);
+        let total_holiday_days = member.effective_holiday_days_for(year, self.settings.total_weekly_hours);
         let first_work_day = member.first_work_day;
         let adj_total = member.overtime_adjustments.adjustments_total(year);
         let r#gen = self.team.r#gen;
@@ -332,11 +332,11 @@ impl EasyHarvest {
         let from = format!("{year}-01-01");
         let to = format!("{year}-12-31");
         let balance_end = balance_end_for_year(year, today);
-        let expected_per_day = member.expected_hours_per_day;
+        let expected_per_day = member.expected_hours_per_day(self.settings.total_weekly_hours);
         let public_holidays = swiss_public_holidays(year);
         let carryover = member.overtime_carryover_for(year);
         let holiday_task_ids = member.holiday_task_ids.clone();
-        let total_holiday_days = member.effective_holiday_days_for(year);
+        let total_holiday_days = member.effective_holiday_days_for(year, self.settings.total_weekly_hours);
         let first_work_day = member.first_work_day;
         let adj_total = member.overtime_adjustments.adjustments_total(year);
         let user_id = member.harvest_user_id;

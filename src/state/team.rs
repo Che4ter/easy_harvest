@@ -6,11 +6,16 @@ use serde::{Deserialize, Serialize};
 use super::overtime_adjustments::OvertimeAdjustmentStore;
 use super::settings::{effective_holiday_days, YearCarryover};
 
+fn default_work_percentage() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamMember {
     pub harvest_user_id: i64,
     pub display_name: String,
-    pub expected_hours_per_day: f64,
+    #[serde(default = "default_work_percentage")]
+    pub work_percentage: f64,
     pub total_holiday_days_per_year: u32,
     #[serde(default)]
     pub holiday_task_ids: Vec<i64>,
@@ -23,12 +28,20 @@ pub struct TeamMember {
 }
 
 impl TeamMember {
-    pub fn effective_holiday_days_for(&self, year: i32) -> f64 {
+    /// Hours this member is expected to work per day, derived from the team
+    /// lead's own weekly-hours baseline (`Settings.total_weekly_hours`) and
+    /// this member's individual `work_percentage`. Mirrors
+    /// `Settings::expected_hours_per_day`.
+    pub fn expected_hours_per_day(&self, lead_weekly_hours: f64) -> f64 {
+        (lead_weekly_hours * self.work_percentage) / 5.0
+    }
+
+    pub fn effective_holiday_days_for(&self, year: i32, lead_weekly_hours: f64) -> f64 {
         effective_holiday_days(
             self.total_holiday_days_per_year,
             self.first_work_day,
             &self.carryover,
-            self.expected_hours_per_day,
+            self.expected_hours_per_day(lead_weekly_hours),
             year,
         )
     }
@@ -82,7 +95,7 @@ mod tests {
         TeamMember {
             harvest_user_id: id,
             display_name: "Alex".into(),
-            expected_hours_per_day: 8.2,
+            work_percentage: 1.0,
             total_holiday_days_per_year: 25,
             holiday_task_ids: vec![],
             first_work_day: None,
@@ -108,6 +121,24 @@ mod tests {
     fn overtime_carryover_for_defaults_to_zero() {
         let m = member(1);
         assert_eq!(m.overtime_carryover_for(2026), 0.0);
+    }
+
+    #[test]
+    fn expected_hours_per_day_scales_lead_weekly_hours_by_percentage() {
+        let mut m = member(1);
+        m.work_percentage = 0.5;
+        assert!((m.expected_hours_per_day(42.0) - 4.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn work_percentage_defaults_to_full_time_when_missing_from_json() {
+        let json = r#"{
+            "harvest_user_id": 1,
+            "display_name": "Alex",
+            "total_holiday_days_per_year": 25
+        }"#;
+        let m: TeamMember = serde_json::from_str(json).unwrap();
+        assert_eq!(m.work_percentage, 1.0);
     }
 
     #[test]

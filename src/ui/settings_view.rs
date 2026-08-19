@@ -944,6 +944,22 @@ fn team_member_settings_card<'a>(
     .spacing(8)
     .align_y(Alignment::Center);
 
+    let wp_display = state.team.work_percentage_inputs.get(&id).cloned().unwrap_or_else(|| {
+        format!("{:.0}", member.work_percentage * 100.0)
+    });
+    let wp_row = row![
+        field_label("Work %"),
+        text_input("100", &wp_display)
+            .on_input(move |v| Message::Team(TeamMsg::WorkPercentageInputChanged(id, v)))
+            .size(13)
+            .padding([6, 10])
+            .style(input_style)
+            .width(Length::Fixed(80.0)),
+        outline_btn_sm("Save").on_press(Message::Team(TeamMsg::WorkPercentageSave(id))),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
     let carryover_rows: Vec<Element<Message>> = {
         let mut entries: Vec<(i32, &crate::state::settings::YearCarryover)> =
             member.carryover.iter().map(|(y, c)| (*y, c)).collect();
@@ -1018,6 +1034,7 @@ fn team_member_settings_card<'a>(
 
     let mut body = column![
         header,
+        wp_row,
         fwd_row,
         caption("Carryover"),
         carryover_list,

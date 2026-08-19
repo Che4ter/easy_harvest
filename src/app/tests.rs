@@ -1254,7 +1254,7 @@ fn team_member(id: i64, name: &str) -> TeamMember {
     TeamMember {
         harvest_user_id: id,
         display_name: name.into(),
-        expected_hours_per_day: 8.0,
+        work_percentage: 1.0,
         total_holiday_days_per_year: 25,
         holiday_task_ids: vec![],
         first_work_day: None,
@@ -1307,9 +1307,9 @@ fn add_member_succeeds_and_persists() {
     assert_eq!(app.team_settings.members.len(), 1);
     assert_eq!(app.team_settings.members[0].harvest_user_id, 555);
     assert_eq!(app.team_settings.members[0].display_name, "Alex");
-    // New member inherits the team lead's own defaults so stats compute
-    // sensibly before anyone edits them.
-    assert_eq!(app.team_settings.members[0].expected_hours_per_day, app.settings.expected_hours_per_day());
+    // New members default to 100% work percentage regardless of the team
+    // lead's own current percentage.
+    assert_eq!(app.team_settings.members[0].work_percentage, 1.0);
 
     let reloaded = crate::state::team::TeamSettings::load(dir.path());
     assert_eq!(reloaded.members.len(), 1, "AddMember must persist to disk");
@@ -1330,6 +1330,33 @@ fn remove_member_clears_stats_and_forms() {
     assert!(!app.team.adjustment_forms.contains_key(&7));
     let reloaded = crate::state::team::TeamSettings::load(dir.path());
     assert!(reloaded.members.is_empty(), "RemoveMember must persist to disk");
+}
+
+#[test]
+fn work_percentage_save_parses_and_persists_valid_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(7, "Alex"));
+    let _ = app.update_team(TeamMsg::WorkPercentageInputChanged(7, "50".into()));
+    let _ = app.update_team(TeamMsg::WorkPercentageSave(7));
+
+    assert_eq!(app.team_settings.member(7).unwrap().work_percentage, 0.5);
+    assert!(!app.team.work_percentage_inputs.contains_key(&7));
+    let reloaded = crate::state::team::TeamSettings::load(dir.path());
+    assert_eq!(reloaded.member(7).unwrap().work_percentage, 0.5);
+}
+
+#[test]
+fn work_percentage_save_rejects_out_of_range_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(7, "Alex"));
+    let _ = app.update_team(TeamMsg::WorkPercentageInputChanged(7, "150".into()));
+    let _ = app.update_team(TeamMsg::WorkPercentageSave(7));
+
+    assert_eq!(app.team_settings.member(7).unwrap().work_percentage, 1.0,
+        "invalid input must not change the stored percentage");
+    assert!(app.error_banner.is_some());
 }
 
 #[test]
