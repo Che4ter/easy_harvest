@@ -2033,3 +2033,78 @@ fn directory_pick_unknown_id_noops_add_form() {
     // Query still clears — an unmatched pick shouldn't leave stale search text.
     assert!(app.team.directory_query.is_empty());
 }
+
+#[test]
+fn vacation_show_form_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+
+    let _ = app.update_vacation(VacationMsg::ShowForm);
+
+    assert!(app.vacation.form.is_none());
+}
+
+#[test]
+fn vacation_form_submit_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    let mut form = VacationForm::new();
+    form.from_input = "01.06.2025".into();
+    form.selected_task_id = Some(1);
+    app.vacation.form = Some(form);
+
+    let _ = app.update_vacation(VacationMsg::FormSubmit);
+
+    assert!(!app.vacation.form.as_ref().unwrap().submitting);
+    // Without the guard, FormSubmit would still run (assignments are empty in
+    // test_instance, so it fails to resolve a project id and sets `error`
+    // rather than `submitting`) — assert `error` stays None too so this test
+    // actually discriminates on the guard rather than passing vacuously.
+    assert!(app.vacation.form.as_ref().unwrap().error.is_none());
+}
+
+#[test]
+fn vacation_delete_entry_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+
+    let task = app.update_vacation(VacationMsg::DeleteEntry(1));
+    // No client is configured in test_instance either way, but the guard
+    // must return before even checking for a client so this documents
+    // intent; assert no local state changed as a proxy for "no-op".
+    let _ = task;
+    assert!(app.vacation.entries.is_empty());
+}
+
+#[test]
+fn vacation_show_form_works_when_not_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = None;
+
+    let _ = app.update_vacation(VacationMsg::ShowForm);
+
+    assert!(app.vacation.form.is_some());
+}
+
+// A lead-initiated FormSubmit can still be in flight (EntriesCreated not yet
+// delivered) when the lead starts impersonating a team member. Without a
+// guard here, the lead's own newly-created entries would land in the
+// impersonated member's displayed vacation.entries/summary once the response
+// arrives -- the same "wrong person's data" shape as Task 4's Bug 2, just
+// race-gated instead of unconditional.
+#[test]
+fn vacation_entries_created_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    app.vacation.year = 2025;
+
+    let entry = make_entry(1, 1, 1, 8.0, false);
+    let _ = app.update_vacation(VacationMsg::EntriesCreated(Ok(vec![entry])));
+
+    assert!(app.vacation.entries.is_empty());
+}

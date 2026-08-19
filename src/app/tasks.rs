@@ -400,7 +400,7 @@ impl EasyHarvest {
         let from = format!("{year}-01-01");
         let to = format!("{year}-12-31");
         let r#gen = self.vacation_gen;
-        let user_id = self.harvest_user_id;
+        let user_id = self.impersonating.or(self.harvest_user_id);
         Task::perform(
             async move {
                 client
@@ -537,10 +537,22 @@ impl EasyHarvest {
     }
 
     pub(super) fn recompute_vacation_summary(&mut self) {
-        let expected_per_day = self.settings.expected_hours_per_day();
-        let task_ids = &self.settings.holiday_task_ids;
-        let today = chrono::Local::now().naive_local().date();
         let year = self.vacation.year;
+        let (expected_per_day, task_ids, total_holiday_days, carryover) = match self.impersonated_member() {
+            Some(member) => (
+                member.expected_hours_per_day(self.settings.total_weekly_hours),
+                member.holiday_task_ids.clone(),
+                member.effective_holiday_days_for(year, self.settings.total_weekly_hours),
+                member.carryover.get(&year).cloned(),
+            ),
+            None => (
+                self.settings.expected_hours_per_day(),
+                self.settings.holiday_task_ids.clone(),
+                self.settings.effective_holiday_days_for(year),
+                self.settings.carryover.get(&year).cloned(),
+            ),
+        };
+        let today = chrono::Local::now().naive_local().date();
 
         // Single pass: parse the date once per entry and bucket into used vs booked.
         let entries = &self.vacation.entries;
@@ -558,16 +570,10 @@ impl EasyHarvest {
                 if d <= today { (used + days, booked) } else { (used, booked + days) }
             });
 
-        let total_days = self.settings.effective_holiday_days_for(year);
+        let total_days = total_holiday_days;
         let days_remaining = total_days - used_days - booked_days;
-        let carryover_days = self
-            .settings
-            .carryover
-            .get(&year)
-            .map(|c| {
-                let epd = self.settings.expected_hours_per_day();
-                if epd > 0.0 { c.holiday_hours / epd } else { 0.0 }
-            })
+        let carryover_days = carryover
+            .map(|c| if expected_per_day > 0.0 { c.holiday_hours / expected_per_day } else { 0.0 })
             .unwrap_or(0.0);
 
         self.vacation.summary = Some(VacationSummary {

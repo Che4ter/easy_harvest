@@ -18,6 +18,7 @@ const PLANNED_COLOR: Color = Color { r: 0.42, g: 0.71, b: 0.98, a: 1.0 };
 pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
     let year = state.vacation.year;
 
+    let impersonating = state.impersonating.is_some();
     let add_label = if state.vacation.form.is_some() { "✕ Cancel" } else { "+ Add" };
     let add_msg = if state.vacation.form.is_some() {
         Message::Vacation(VacationMsg::HideForm)
@@ -39,12 +40,23 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
             if state.loading { None } else { Some(Message::Vacation(VacationMsg::Refresh)) }
         ),
         Space::new().width(8).height(8),
-        primary_btn(add_label).on_press(add_msg),
+        primary_btn(add_label).on_press_maybe((!impersonating).then_some(add_msg)),
     ]
     .align_y(Alignment::Center);
 
+    let (expected_per_day, task_ids): (f64, Vec<i64>) = match state.impersonated_member() {
+        Some(member) => (
+            member.expected_hours_per_day(state.settings.total_weekly_hours),
+            member.holiday_task_ids.clone(),
+        ),
+        None => (
+            state.settings.expected_hours_per_day(),
+            state.settings.holiday_task_ids.clone(),
+        ),
+    };
+
     // Guard: no holiday tasks configured
-    if state.settings.holiday_task_ids.is_empty() {
+    if task_ids.is_empty() {
         return scrollable(
             column![
                 year_row,
@@ -73,8 +85,6 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         .into();
     }
 
-    let expected_per_day = state.settings.expected_hours_per_day();
-    let task_ids = &state.settings.holiday_task_ids;
     let today = Local::now().naive_local().date();
 
     // Filter and sort vacation entries for this year
@@ -122,7 +132,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
                 let is_future = NaiveDate::parse_from_str(&e.spent_date, "%Y-%m-%d")
                     .map(|d| d > today)
                     .unwrap_or(false);
-                vacation_row(e, expected_per_day, is_future)
+                vacation_row(e, expected_per_day, is_future, impersonating)
             })
             .collect();
         column(rows).spacing(LIST_ROW_SPACING).into()
@@ -301,6 +311,7 @@ fn vacation_row(
     entry: &TimeEntry,
     expected_per_day: f64,
     is_future: bool,
+    impersonating: bool,
 ) -> Element<'_, Message> {
     let date_str = NaiveDate::parse_from_str(&entry.spent_date, "%Y-%m-%d")
         .map(|d| format!("{:2} {}", d.day(), month_abbr(d.month())))
@@ -326,7 +337,7 @@ fn vacation_row(
         Space::new().into()
     };
 
-    let delete_btn: Element<Message> = if is_future {
+    let delete_btn: Element<Message> = if is_future && !impersonating {
         let id = entry.id;
         delete_chip_btn(Message::Vacation(VacationMsg::DeleteEntry(id)))
     } else {

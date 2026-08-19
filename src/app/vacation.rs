@@ -149,6 +149,7 @@ impl EasyHarvest {
             }
 
             VacationMsg::ShowForm => {
+                if self.impersonating.is_some() { return Task::none(); }
                 let mut form = VacationForm::new();
                 form.selected_task_id = self.settings.holiday_task_ids.first().copied();
                 self.vacation.form = Some(form);
@@ -156,11 +157,13 @@ impl EasyHarvest {
             }
 
             VacationMsg::HideForm => {
+                if self.impersonating.is_some() { return Task::none(); }
                 self.vacation.form = None;
                 Task::none()
             }
 
             VacationMsg::FromChanged(v) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(f) = &mut self.vacation.form {
                     f.from_input = v;
                     f.error = None;
@@ -169,6 +172,7 @@ impl EasyHarvest {
             }
 
             VacationMsg::ToChanged(v) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(f) = &mut self.vacation.form {
                     f.to_input = v;
                     f.error = None;
@@ -177,16 +181,19 @@ impl EasyHarvest {
             }
 
             VacationMsg::DayTypeFull => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(f) = &mut self.vacation.form { f.full_day = true; }
                 Task::none()
             }
 
             VacationMsg::DayTypeHalf => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(f) = &mut self.vacation.form { f.full_day = false; }
                 Task::none()
             }
 
             VacationMsg::TaskSelected(task_id) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(f) = &mut self.vacation.form {
                     f.selected_task_id = Some(task_id);
                     f.error = None;
@@ -195,6 +202,7 @@ impl EasyHarvest {
             }
 
             VacationMsg::FormSubmit => {
+                if self.impersonating.is_some() { return Task::none(); }
                 let Some(form) = &mut self.vacation.form else { return Task::none(); };
                 let parse = |s: &str| {
                     NaiveDate::parse_from_str(s.trim(), "%d.%m.%Y")
@@ -248,6 +256,7 @@ impl EasyHarvest {
             }
 
             VacationMsg::EntriesCreated(result) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 if let Some(f) = &mut self.vacation.form {
                     f.submitting = false;
                 }
@@ -288,6 +297,7 @@ impl EasyHarvest {
             }
 
             VacationMsg::DeleteEntry(id) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 let Some(client) = self.client.clone() else { return Task::none(); };
                 Task::perform(
                     async move {
