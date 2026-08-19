@@ -1525,6 +1525,29 @@ fn remove_member_of_impersonated_member_performs_full_impersonation_exit() {
     assert_eq!(app.vacation_gen, before_vacation + 1);
 }
 
+// `ImpersonationExit` clears `error_banner`, so the delegation must happen
+// *before* `save_team_or_warn()` — otherwise removing the impersonated member
+// while the settings file cannot be written silently swallows the save error.
+#[test]
+fn remove_impersonated_member_keeps_save_failure_banner() {
+    let dir = tempfile::tempdir().unwrap();
+    // A regular file where the data dir should be ⇒ every save fails.
+    let blocked = dir.path().join("blocked");
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.settings.data_dir = blocked;
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.impersonating = Some(9);
+
+    let _ = app.update_team(TeamMsg::RemoveMember(9));
+
+    assert_eq!(app.impersonating, None, "the exit still runs");
+    assert!(
+        app.error_banner.is_some(),
+        "a failed team-settings save must stay visible, not be wiped by the impersonation exit"
+    );
+}
+
 // ── effective_user_id: the branch's most safety-critical resolution ──────────
 //
 // `effective_user_id()` decides *whose* Harvest data every fetch targets.

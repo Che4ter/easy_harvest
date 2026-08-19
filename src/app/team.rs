@@ -208,17 +208,18 @@ impl EasyHarvest {
                 self.team.first_work_day_inputs.remove(&id);
                 self.team.work_percentage_inputs.remove(&id);
                 self.team.r#gen += 1;
+                // Delegate to the real exit path: clearing the flag alone would
+                // leave the removed member's cached entries, vacation and stats
+                // on screen with no read-only banner and every mutation control
+                // re-enabled. `ImpersonationExit` is keyed purely off
+                // `self.impersonating` and never reads the roster, so running it
+                // here — after the member is gone, before the save — is safe. It
+                // must run *before* `save_team_or_warn`, because it clears
+                // `error_banner` and would otherwise swallow a save failure.
+                let exit = (self.impersonating == Some(id))
+                    .then(|| self.update_team(TeamMsg::ImpersonationExit));
                 self.save_team_or_warn();
-                if self.impersonating == Some(id) {
-                    // Delegate to the real exit path: clearing the flag alone
-                    // would leave the removed member's cached entries, vacation
-                    // and stats on screen with no read-only banner and every
-                    // mutation control re-enabled. `ImpersonationExit` is keyed
-                    // purely off `self.impersonating`, so running it after the
-                    // member is gone from the roster is safe.
-                    return self.update_team(TeamMsg::ImpersonationExit);
-                }
-                Task::none()
+                exit.unwrap_or_else(Task::none)
             }
 
             TeamMsg::ImpersonationStart(id) => {
