@@ -4,6 +4,7 @@
 /.claude
 /docs
 .serena
+/.worktrees
 
 # Credentials — never commit these
 api.txt
