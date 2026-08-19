@@ -1384,6 +1384,107 @@ fn member_stats_loaded_stores_result_for_current_generation() {
 }
 
 #[test]
+fn impersonation_start_sets_id_navigates_to_day_and_bumps_gens() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.page = Page::Stats;
+    let before_entries = app.entries_gen;
+    let before_stats = app.stats_gen;
+    let before_vacation = app.vacation_gen;
+    let before_assignments = app.assignments_gen;
+    let before_billable = app.billable_gen;
+    let before_project_tracking = app.project_tracking_gen;
+
+    let _ = app.update_team(TeamMsg::ImpersonationStart(9));
+
+    assert_eq!(app.impersonating, Some(9));
+    assert_eq!(app.page, Page::Day);
+    assert_eq!(app.entries_gen, before_entries + 1);
+    assert_eq!(app.stats_gen, before_stats + 1);
+    assert_eq!(app.vacation_gen, before_vacation + 1);
+    assert_eq!(app.assignments_gen, before_assignments, "assignments_gen must not be bumped");
+    assert_eq!(app.billable_gen, before_billable, "billable_gen must not be bumped");
+    assert_eq!(app.project_tracking_gen, before_project_tracking, "project_tracking_gen must not be bumped");
+}
+
+#[test]
+fn impersonation_start_clears_open_forms_and_pending_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.entry_form = Some(EntryForm::new());
+    app.pending_delete = Some(1);
+    app.overtime_adj_form = Some(OvertimeAdjustmentForm::default());
+    app.vacation.form = Some(VacationForm::new());
+
+    let _ = app.update_team(TeamMsg::ImpersonationStart(9));
+
+    assert!(app.entry_form.is_none());
+    assert!(app.pending_delete.is_none());
+    assert!(app.overtime_adj_form.is_none());
+    assert!(app.vacation.form.is_none());
+}
+
+#[test]
+fn impersonation_exit_clears_id_keeps_page_and_bumps_gens() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.impersonating = Some(9);
+    app.page = Page::Stats;
+    let before_entries = app.entries_gen;
+    let before_stats = app.stats_gen;
+    let before_vacation = app.vacation_gen;
+
+    let _ = app.update_team(TeamMsg::ImpersonationExit);
+
+    assert_eq!(app.impersonating, None);
+    assert_eq!(app.page, Page::Stats, "exit must not force navigation");
+    assert_eq!(app.entries_gen, before_entries + 1);
+    assert_eq!(app.stats_gen, before_stats + 1);
+    assert_eq!(app.vacation_gen, before_vacation + 1);
+}
+
+#[test]
+fn remove_member_clears_impersonation_of_removed_member() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.impersonating = Some(9);
+
+    let _ = app.update_team(TeamMsg::RemoveMember(9));
+
+    assert_eq!(app.impersonating, None);
+}
+
+#[test]
+fn remove_member_leaves_other_impersonation_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.team_settings.members.push(team_member(10, "Alex"));
+    app.impersonating = Some(9);
+
+    let _ = app.update_team(TeamMsg::RemoveMember(10));
+
+    assert_eq!(app.impersonating, Some(9));
+}
+
+#[test]
+fn impersonated_member_looks_up_by_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+
+    assert!(app.impersonated_member().is_none());
+    app.impersonating = Some(9);
+    assert_eq!(app.impersonated_member().unwrap().display_name, "Sam");
+    app.impersonating = Some(404);
+    assert!(app.impersonated_member().is_none());
+}
+
+#[test]
 fn carryover_delete_removes_entry() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());

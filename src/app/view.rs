@@ -20,6 +20,13 @@ impl EasyHarvest {
 
         let mut col = column![nav].spacing(0).height(iced::Length::Fill);
 
+        if let Some(id) = self.impersonating {
+            let name = self.team_settings.member(id)
+                .map(|m| m.display_name.clone())
+                .unwrap_or_else(|| "member".to_string());
+            col = col.push(impersonation_banner(&name));
+        }
+
         if let Some(err) = &self.error_banner {
             col = col.push(error_banner(err));
         }
@@ -125,6 +132,40 @@ fn nav_bar(current: &Page, team_lead_mode: bool) -> Element<'static, Message> {
         .padding([10, 16])
         .width(iced::Length::Fill)
         .into()
+}
+
+fn impersonation_banner(name: &str) -> Element<'static, Message> {
+    let exit_btn = button(
+        text("Exit").font(FONT_MEDIUM).size(13).color(Color::WHITE),
+    )
+    .style(|_, _| button::Style {
+        background: Some(iced::Background::Color(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.20 })),
+        text_color: Color::WHITE,
+        border: iced::Border { radius: 4.0.into(), ..Default::default() },
+        ..Default::default()
+    })
+    .padding([4, 10])
+    .on_press(Message::Team(TeamMsg::ImpersonationExit));
+
+    container(
+        row![
+            text(format!("Viewing {name} — read-only"))
+                .font(FONT_REGULAR)
+                .size(13)
+                .color(Color::WHITE),
+            Space::new().width(iced::Length::Fill),
+            exit_btn,
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    )
+    .style(|_| container::Style {
+        background: Some(iced::Background::Color(ACCENT)),
+        ..Default::default()
+    })
+    .padding([8, 16])
+    .width(iced::Length::Fill)
+    .into()
 }
 
 fn error_banner(msg: &str) -> Element<'_, Message> {

@@ -292,6 +292,10 @@ pub struct EasyHarvest {
     pub month_summaries: Option<Vec<crate::stats::MonthSummary>>,
     pub loading: bool,
     pub error_banner: Option<String>,
+    /// `Some(harvest_user_id)` of the `TeamMember` currently being viewed
+    /// read-only via the Team tab's "Impersonate" button; `None` when the
+    /// team lead is viewing their own data (the normal state).
+    pub impersonating: Option<i64>,
 
     // Generation counters — prevent stale async results from overwriting fresh data
     pub entries_gen: u64,
@@ -465,6 +469,7 @@ impl EasyHarvest {
             month_summaries: None,
             loading: false,
             error_banner: None,
+            impersonating: None,
             entries_gen: 0,
             assignments_gen: 0,
             vacation_gen: 0,
@@ -535,6 +540,14 @@ impl EasyHarvest {
         (state, task)
     }
 
+    /// The `TeamMember` currently being viewed via impersonation, if any.
+    /// `None` both when not impersonating and when `self.impersonating`
+    /// points at an id no longer present in the roster (defensive; the
+    /// Team tab only ever dispatches `ImpersonationStart` with a live id).
+    pub fn impersonated_member(&self) -> Option<&crate::state::team::TeamMember> {
+        self.impersonating.and_then(|id| self.team_settings.member(id))
+    }
+
     /// Construct a minimal `EasyHarvest` for unit tests.
     ///
     /// All I/O-backed sub-states are loaded from `data_dir`; they return
@@ -566,6 +579,7 @@ impl EasyHarvest {
             month_summaries: None,
             loading: false,
             error_banner: None,
+            impersonating: None,
             entries_gen: 0,
             assignments_gen: 0,
             vacation_gen: 0,

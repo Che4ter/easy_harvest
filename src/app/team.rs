@@ -58,6 +58,16 @@ pub enum TeamMsg {
     HarvestIdChanged(String),
     AddMember,
     RemoveMember(i64),
+    /// Start read-only impersonation of a roster member. Navigates to the
+    /// Day page and bumps `entries_gen`/`stats_gen`/`vacation_gen` so any
+    /// in-flight fetch for the team lead's own identity is discarded when
+    /// it resolves. Deliberately does not bump `assignments_gen`,
+    /// `billable_gen`, or `project_tracking_gen` — see Global Constraints.
+    ImpersonationStart(i64),
+    /// Exit impersonation and return to the team lead's own data. Does not
+    /// force navigation — the lead stays on whatever page they were
+    /// viewing. Bumps the same three generation counters as `ImpersonationStart`.
+    ImpersonationExit,
     FirstWorkDayInputChanged(i64, String),
     FirstWorkDaySave(i64),
     WorkPercentageInputChanged(i64, String),
@@ -199,7 +209,62 @@ impl EasyHarvest {
                 self.team.work_percentage_inputs.remove(&id);
                 self.team.r#gen += 1;
                 self.save_team_or_warn();
+                if self.impersonating == Some(id) {
+                    self.impersonating = None;
+                }
                 Task::none()
+            }
+
+            TeamMsg::ImpersonationStart(id) => {
+                self.impersonating = Some(id);
+                self.page = Page::Day;
+                self.date_picker.open = false;
+                self.entry_form = None;
+                self.pending_delete = None;
+                self.overtime_adj_form = None;
+                self.vacation.form = None;
+                self.error_banner = None;
+                self.entries.clear();
+                self.year_balance = None;
+                self.holiday_stats = None;
+                self.month_summaries = None;
+                self.vacation.entries.clear();
+                self.vacation.entries.shrink_to_fit();
+                self.vacation.summary = None;
+                self.entries_gen += 1;
+                self.stats_gen += 1;
+                self.vacation_gen += 1;
+                self.loading = true;
+                Task::batch([
+                    self.load_entries_task(),
+                    self.load_stats_task(),
+                    self.load_vacation_task(),
+                ])
+            }
+
+            TeamMsg::ImpersonationExit => {
+                self.impersonating = None;
+                self.entry_form = None;
+                self.pending_delete = None;
+                self.overtime_adj_form = None;
+                self.vacation.form = None;
+                self.error_banner = None;
+                self.entries.clear();
+                self.year_balance = None;
+                self.holiday_stats = None;
+                self.month_summaries = None;
+                self.vacation.entries.clear();
+                self.vacation.entries.shrink_to_fit();
+                self.vacation.summary = None;
+                self.entries_gen += 1;
+                self.stats_gen += 1;
+                self.vacation_gen += 1;
+                self.loading = true;
+                Task::batch([
+                    self.load_entries_task(),
+                    self.load_stats_task(),
+                    self.load_vacation_task(),
+                ])
             }
 
             TeamMsg::FirstWorkDayInputChanged(id, v) => {

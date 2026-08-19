@@ -112,7 +112,13 @@ fn member_card<'a>(
         }
     };
 
-    container(column![name_row, body].spacing(10))
+    let impersonate_btn = outline_btn_sm("Impersonate")
+        .on_press(Message::Team(TeamMsg::ImpersonationStart(member.harvest_user_id)));
+
+    let actions_row = row![Space::new().width(Length::Fill), impersonate_btn]
+        .align_y(Alignment::Center);
+
+    container(column![name_row, body, actions_row].spacing(10))
         .style(card_style)
         .padding(12)
         .width(Length::Fill)
