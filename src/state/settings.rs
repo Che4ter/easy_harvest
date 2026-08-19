@@ -154,6 +154,14 @@ pub struct Settings {
     #[serde(default)]
     pub team_lead_mode: bool,
 
+    /// Whether the user dismissed the "you have Harvest Administrator
+    /// access — enable Team Lead mode?" hint. Harvest Administrator access
+    /// (unlike the per-project "manager" role) is a reliable company-wide
+    /// signal, so this hint is shown once and remembered rather than
+    /// re-prompting on every launch.
+    #[serde(default)]
+    pub admin_hint_dismissed: bool,
+
     /// Whether the app is registered to launch at login.
     /// Synced with the OS autostart state on every load — not persisted to JSON.
     #[serde(skip)]
@@ -281,6 +289,7 @@ impl Default for Settings {
             holiday_task_ids: Vec::new(),
             first_work_day: None,
             team_lead_mode: false,
+            admin_hint_dismissed: false,
             autostart: false,
         }
     }
@@ -904,5 +913,10 @@ mod tests {
     #[test]
     fn team_lead_mode_defaults_to_false() {
         assert!(!Settings::default().team_lead_mode);
+    }
+
+    #[test]
+    fn admin_hint_dismissed_defaults_to_false() {
+        assert!(!Settings::default().admin_hint_dismissed);
     }
 }

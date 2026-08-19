@@ -1460,3 +1460,101 @@ fn start_all_team_carryover_syncs_noop_when_team_lead_mode_off() {
     // regardless, but this also documents that the gate exists.
     let _ = app.start_all_team_carryover_syncs();
 }
+
+// ── Company user directory (roster picker) ────────────────────────────────
+
+fn dummy_directory_user(id: i64, first: &str, last: &str) -> crate::harvest::models::User {
+    crate::harvest::models::User {
+        id,
+        first_name: first.into(),
+        last_name: last.into(),
+        email: format!("{first}.{last}@example.com").to_lowercase(),
+        weekly_capacity: Some(144000),
+        is_admin: false,
+        is_active: true,
+    }
+}
+
+#[test]
+fn directory_ensure_loaded_noops_when_not_admin() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.harvest_user_is_admin = false;
+    let _ = app.update_team(TeamMsg::DirectoryEnsureLoaded);
+    assert!(app.team.directory.is_empty());
+    assert!(!app.team.directory_loading);
+}
+
+#[test]
+fn directory_ensure_loaded_reads_valid_cache_without_a_client() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.harvest_user_is_admin = true;
+    let users = vec![dummy_directory_user(1, "Ada", "Lovelace")];
+    crate::state::cache::UserDirectoryCache::new(users)
+        .save(dir.path())
+        .expect("cache save");
+
+    // client is None in test_instance — a cache hit must serve without one,
+    // proving DirectoryEnsureLoaded checks the cache before the client guard
+    // would otherwise make it a no-op.
+    let _ = app.update_team(TeamMsg::DirectoryEnsureLoaded);
+
+    assert_eq!(app.team.directory.len(), 1);
+    assert_eq!(app.team.directory[0].email, "ada.lovelace@example.com");
+    assert!(!app.team.directory_loading);
+}
+
+#[test]
+fn directory_ensure_loaded_skips_refetch_once_already_populated() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.harvest_user_is_admin = true;
+    app.team.directory = vec![dummy_directory_user(1, "Ada", "Lovelace")];
+
+    // No client and no cache on disk — if this tried to fetch or reload,
+    // it would either panic or clear the directory. Neither happens.
+    let _ = app.update_team(TeamMsg::DirectoryEnsureLoaded);
+
+    assert_eq!(app.team.directory.len(), 1);
+}
+
+#[test]
+fn directory_loaded_err_sets_error_and_clears_loading() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team.directory_loading = true;
+
+    let _ = app.update_team(TeamMsg::DirectoryLoaded(Err("boom".into())));
+
+    assert!(!app.team.directory_loading);
+    assert_eq!(app.team.directory_error.as_deref(), Some("boom"));
+}
+
+#[test]
+fn directory_pick_fills_add_form_and_clears_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team.directory = vec![dummy_directory_user(42, "Grace", "Hopper")];
+    app.team.directory_query = "gra".into();
+
+    let _ = app.update_team(TeamMsg::DirectoryPick(42));
+
+    assert_eq!(app.team.add_form.name_input, "Grace Hopper");
+    assert_eq!(app.team.add_form.id_input, "42");
+    assert!(app.team.directory_query.is_empty());
+}
+
+#[test]
+fn directory_pick_unknown_id_noops_add_form() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team.directory_query = "gra".into();
+
+    let _ = app.update_team(TeamMsg::DirectoryPick(999));
+
+    assert!(app.team.add_form.name_input.is_empty());
+    assert!(app.team.add_form.id_input.is_empty());
+    // Query still clears — an unmatched pick shouldn't leave stale search text.
+    assert!(app.team.directory_query.is_empty());
+}

@@ -303,7 +303,10 @@ impl EasyHarvest {
                 // whenever this arm runs after a deferred `CurrentUserLoaded`.
                 // `TeamMsg::Refresh` bumps `self.team.r#gen` itself, so we don't
                 // duplicate that increment here.
-                self.update_team(TeamMsg::Refresh)
+                Task::batch([
+                    self.update_team(TeamMsg::Refresh),
+                    self.update_team(TeamMsg::DirectoryEnsureLoaded),
+                ])
             }
         }
     }

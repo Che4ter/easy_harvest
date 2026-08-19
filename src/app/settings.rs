@@ -174,8 +174,16 @@ pub enum SettingsMsg {
     CarryoverReset,
 
     /// Toggle Team Lead Mode — shows/hides the Team tab and Team management
-    /// section. Manual only; never auto-detected from Harvest permissions.
+    /// section. Always an explicit user action — the per-project Harvest
+    /// "manager" role is never auto-detected. Harvest Administrator access
+    /// *is* company-wide and reliable, so it drives the dismissible hint
+    /// (see `DismissAdminHint`) that suggests enabling this, rather than
+    /// flipping it automatically.
     TeamLeadModeToggle,
+
+    /// User dismissed the "you have Harvest Administrator access" hint
+    /// without enabling Team Lead Mode. Persisted so it isn't shown again.
+    DismissAdminHint,
 }
 
 impl EasyHarvest {
@@ -893,6 +901,12 @@ impl EasyHarvest {
 
             SettingsMsg::TeamLeadModeToggle => {
                 self.settings.team_lead_mode = !self.settings.team_lead_mode;
+                self.save_settings_or_warn();
+                Task::none()
+            }
+
+            SettingsMsg::DismissAdminHint => {
+                self.settings.admin_hint_dismissed = true;
                 self.save_settings_or_warn();
                 Task::none()
             }

@@ -365,6 +365,19 @@ impl EasyHarvest {
         )
     }
 
+    /// Fetch the full company user directory (`GET /v2/users`) for the
+    /// roster picker. Administrator-only endpoint — callers must check
+    /// `self.harvest_user_is_admin` before dispatching this.
+    pub(super) fn load_team_directory_task(&self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { client.list_all_users().await.map_err(|e| e.to_string()) },
+            |result| Message::Team(TeamMsg::DirectoryLoaded(result)),
+        )
+    }
+
     pub(super) fn load_vacation_task(&self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();

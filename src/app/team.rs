@@ -27,6 +27,16 @@ pub struct TeamPageState {
     pub adjustment_forms: HashMap<i64, OvertimeAdjustmentForm>,
     pub first_work_day_inputs: HashMap<i64, String>,
     pub r#gen: u64,
+
+    /// Company user directory for the "add member" roster picker.
+    /// Populated from `UserDirectoryCache` (or a live fetch) on first use of
+    /// the Team page — empty and unused for non-admin accounts.
+    pub directory: Vec<crate::harvest::models::User>,
+    pub directory_loading: bool,
+    pub directory_error: Option<String>,
+    /// Search text typed into the roster picker; also doubles as the
+    /// "picker is open" signal (non-empty ⇒ suggestions are shown).
+    pub directory_query: String,
 }
 
 impl TeamPageState {
@@ -49,6 +59,17 @@ pub enum TeamMsg {
     RemoveMember(i64),
     FirstWorkDayInputChanged(i64, String),
     FirstWorkDaySave(i64),
+
+    /// Load the company user directory if it isn't already loaded this
+    /// session, preferring a fresh disk cache over a live fetch. No-op for
+    /// non-admin accounts. Dispatched whenever the Team page loads.
+    DirectoryEnsureLoaded,
+    /// Force a live re-fetch, bypassing the cache ("↺ Refresh directory").
+    DirectoryRefresh,
+    DirectoryLoaded(Result<Vec<crate::harvest::models::User>, String>),
+    DirectoryQueryChanged(String),
+    /// User picked a directory entry — fills the add-member name/ID fields.
+    DirectoryPick(i64),
 
     CarryoverDelete(i64, i32),
     CarryoverSyncStart(i64),
@@ -321,6 +342,67 @@ impl EasyHarvest {
                 }
                 self.save_team_or_warn();
                 Task::done(Message::Team(TeamMsg::Refresh))
+            }
+
+            TeamMsg::DirectoryEnsureLoaded => {
+                if !self.harvest_user_is_admin {
+                    return Task::none();
+                }
+                if !self.team.directory.is_empty() {
+                    return Task::none();
+                }
+                if let Some(cache) = crate::state::cache::UserDirectoryCache::load(&self.settings.data_dir)
+                    && cache.is_valid()
+                {
+                    self.team.directory = cache.users;
+                    return Task::none();
+                }
+                if self.client.is_none() {
+                    return Task::none();
+                }
+                self.team.directory_loading = true;
+                self.team.directory_error = None;
+                self.load_team_directory_task()
+            }
+
+            TeamMsg::DirectoryRefresh => {
+                if !self.harvest_user_is_admin || self.client.is_none() {
+                    return Task::none();
+                }
+                self.team.directory_loading = true;
+                self.team.directory_error = None;
+                self.load_team_directory_task()
+            }
+
+            TeamMsg::DirectoryLoaded(result) => {
+                self.team.directory_loading = false;
+                match result {
+                    Ok(users) => {
+                        self.team.directory_error = None;
+                        let cache = crate::state::cache::UserDirectoryCache::new(users.clone());
+                        if let Err(e) = cache.save(&self.settings.data_dir) {
+                            self.error_banner = Some(format!("Failed to cache user directory: {e}"));
+                        }
+                        self.team.directory = users;
+                    }
+                    Err(e) => self.team.directory_error = Some(e),
+                }
+                Task::none()
+            }
+
+            TeamMsg::DirectoryQueryChanged(v) => {
+                self.team.directory_query = v;
+                Task::none()
+            }
+
+            TeamMsg::DirectoryPick(id) => {
+                if let Some(user) = self.team.directory.iter().find(|u| u.id == id) {
+                    self.team.add_form.name_input = format!("{} {}", user.first_name, user.last_name);
+                    self.team.add_form.id_input = user.id.to_string();
+                    self.team.add_form.error = None;
+                }
+                self.team.directory_query = String::new();
+                Task::none()
             }
         }
     }
