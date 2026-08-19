@@ -1198,16 +1198,31 @@ fn fill_remaining_targets_worked_time_not_expected_daily_hours() {
     assert!((app.settings.expected_hours_per_day() - 8.2).abs() < 1e-9);
 
     let now = chrono::Local::now().naive_local().time();
+    // `NaiveTime` subtraction wraps at midnight instead of erroring, so
+    // blindly subtracting 77 minutes near local midnight would wrap to a
+    // "start" time-of-day that looks later than `now`, making
+    // worked_duration() see start > now and return zero. Clamp to midnight
+    // instead, and compute the expected worked duration the same way, so
+    // the assertion stays exact no matter what time of day the suite runs.
+    let midnight = chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+    let target_start = now - chrono::Duration::minutes(77);
+    let start = if target_start <= now { target_start } else { midnight };
+    // Round the same way production does (seconds/3600 hours, then *60
+    // rounded) rather than truncating, so this matches exactly.
+    let worked_secs = now.signed_duration_since(start).num_seconds();
+    let worked_mins = (worked_secs as f64 / 60.0).round() as i64;
+
     let mut work_day = crate::state::work_day::WorkDay::new(app.current_date);
-    work_day.start(now - chrono::Duration::minutes(77));
+    work_day.start(start);
     app.work_day_store.set(work_day);
 
     app.entry_form = Some(EntryForm::new());
     let _ = app.update_entries(EntryMsg::FillRemaining);
 
     let hours_input = app.entry_form.as_ref().unwrap().hours_input.clone();
-    assert_eq!(hours_input, "1:17",
-        "Fill must propose the worked time (1:17), not the larger expected daily target (8:12)");
+    let expected = format!("{}:{:02}", worked_mins / 60, worked_mins % 60);
+    assert_eq!(hours_input, expected,
+        "Fill must propose the worked time, not the larger expected daily target (8:12)");
 }
 
 // ── M6-F4: vacation_row division guard when expected_per_day == 0.0 ──────────
