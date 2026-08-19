@@ -1408,7 +1408,7 @@ fn member_stats_loaded_ignores_stale_generation() {
         1,
         Err("should be ignored".into()),
     ));
-    assert!(app.team.stats.get(&1).is_none());
+    assert!(!app.team.stats.contains_key(&1));
 }
 
 #[test]
