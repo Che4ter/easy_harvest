@@ -2127,3 +2127,69 @@ fn vacation_entry_deleted_no_ops_while_impersonating() {
 
     assert_eq!(app.vacation.entries.len(), 1);
 }
+
+#[test]
+fn settings_save_profile_unaffected_by_impersonation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.impersonating = Some(9);
+    app.settings_form.weekly_hours_input = "42".into();
+    app.settings_form.percentage_input = "100".into();
+    app.settings_form.holidays_input = "25".into();
+    app.settings_form.first_work_day_input = String::new();
+
+    let _ = app.update_settings(SettingsMsg::SaveProfile);
+
+    assert_eq!(app.settings.total_weekly_hours, 42.0, "Settings must remain editable while impersonating");
+}
+
+#[test]
+fn team_add_member_unaffected_by_impersonation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.impersonating = Some(9);
+    app.team.add_form.name_input = "Jamie".into();
+    app.team.add_form.id_input = "42".into();
+
+    let _ = app.update_team(TeamMsg::AddMember);
+
+    assert!(app.team_settings.member(42).is_some(), "Team tab must remain editable while impersonating");
+}
+
+#[test]
+fn nav_date_next_still_works_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    let before = app.current_date;
+
+    let _ = app.update(Message::Nav(NavMsg::DateNext));
+
+    assert_eq!(app.current_date, before + chrono::Duration::days(1));
+}
+
+#[test]
+fn stats_year_next_still_works_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    let before = app.overtime_year;
+
+    let _ = app.update_stats(StatsMsg::YearNext);
+
+    assert_eq!(app.overtime_year, before + 1);
+}
+
+#[test]
+fn vacation_year_next_still_works_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+    let before = app.vacation.year;
+
+    let _ = app.update_vacation(VacationMsg::YearNext);
+
+    assert_eq!(app.vacation.year, before + 1);
+}
