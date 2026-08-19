@@ -3,7 +3,7 @@ use std::path::Path;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::harvest::models::ProjectAssignment;
+use crate::harvest::models::{ProjectAssignment, User};
 
 /// Cached list of project assignments with a 24-hour TTL.
 ///
@@ -54,6 +54,47 @@ impl ProjectCache {
         let json = serde_json::to_string_pretty(self)
             .map_err(std::io::Error::other)?;
         super::io::atomic_write(&dir.join("project_assignments.json"), &json)
+    }
+}
+
+/// Cached company user directory (`GET /v2/users`) with a 24-hour TTL.
+///
+/// Only populated for accounts with Harvest Administrator access — the
+/// underlying endpoint 403s otherwise. Lives at
+/// `<data_dir>/cache/company_users.json`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserDirectoryCache {
+    pub users: Vec<User>,
+    pub fetched_at: DateTime<Utc>,
+}
+
+impl UserDirectoryCache {
+    /// Create a new cache stamped with the current UTC time.
+    pub fn new(users: Vec<User>) -> Self {
+        Self {
+            users,
+            fetched_at: Utc::now(),
+        }
+    }
+
+    /// Returns `true` if the cache is younger than 24 hours.
+    pub fn is_valid(&self) -> bool {
+        Utc::now().signed_duration_since(self.fetched_at) < Duration::hours(24)
+    }
+
+    /// Load from disk.  Returns `None` if the file is missing or cannot be parsed.
+    pub fn load(data_dir: &Path) -> Option<Self> {
+        let path = data_dir.join("cache").join("company_users.json");
+        super::io::load_json(&path)
+    }
+
+    /// Persist to `<data_dir>/cache/company_users.json`.
+    pub fn save(&self, data_dir: &Path) -> Result<(), std::io::Error> {
+        let dir = data_dir.join("cache");
+        std::fs::create_dir_all(&dir)?;
+        let json = serde_json::to_string_pretty(self)
+            .map_err(std::io::Error::other)?;
+        super::io::atomic_write(&dir.join("company_users.json"), &json)
     }
 }
 
@@ -111,5 +152,48 @@ mod tests {
     fn test_load_returns_none_for_missing_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         assert!(ProjectCache::load(dir.path()).is_none());
+    }
+
+    fn dummy_users() -> Vec<User> {
+        vec![User {
+            id: 1,
+            first_name: "Ada".into(),
+            last_name: "Lovelace".into(),
+            email: "ada@example.com".into(),
+            weekly_capacity: Some(144000),
+            is_admin: false,
+            is_active: true,
+        }]
+    }
+
+    #[test]
+    fn test_new_user_directory_cache_is_valid() {
+        let cache = UserDirectoryCache::new(dummy_users());
+        assert!(cache.is_valid());
+    }
+
+    #[test]
+    fn test_stale_user_directory_cache_is_invalid() {
+        let mut cache = UserDirectoryCache::new(dummy_users());
+        cache.fetched_at = Utc::now() - Duration::hours(25);
+        assert!(!cache.is_valid());
+    }
+
+    #[test]
+    fn test_user_directory_cache_save_and_load_roundtrip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = UserDirectoryCache::new(dummy_users());
+        cache.save(dir.path()).expect("save failed");
+
+        let loaded = UserDirectoryCache::load(dir.path()).expect("load returned None");
+        assert_eq!(loaded.users.len(), 1);
+        assert_eq!(loaded.users[0].email, "ada@example.com");
+        assert!(loaded.is_valid());
+    }
+
+    #[test]
+    fn test_user_directory_cache_load_returns_none_for_missing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(UserDirectoryCache::load(dir.path()).is_none());
     }
 }

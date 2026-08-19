@@ -101,7 +101,7 @@ impl EasyHarvest {
                 client
                     .get_current_user()
                     .await
-                    .map(|u| u.id)
+                    .map(|u| CurrentUserInfo { id: u.id, is_admin: u.is_admin })
                     .map_err(|e| e.to_string())
             },
             Message::CurrentUserLoaded,

@@ -95,6 +95,16 @@ pub struct User {
     pub last_name: String,
     pub email: String,
     pub weekly_capacity: Option<i64>,
+    #[serde(default)]
+    pub is_admin: bool,
+    #[serde(default)]
+    pub is_active: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UsersResponse {
+    pub users: Vec<User>,
+    pub total_pages: i64,
 }
 
 // --- Project user assignment (for listing projects assigned to current user) ---

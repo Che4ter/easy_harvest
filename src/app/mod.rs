@@ -240,7 +240,7 @@ pub enum Message {
     WindowCloseRequested(window::Id),
 
     // Current user — fetched on startup so we can filter time-entry requests
-    CurrentUserLoaded(Result<i64, String>),
+    CurrentUserLoaded(Result<CurrentUserInfo, String>),
 
     // Update check — Some((tag, assets)); assets is None on platforms
     // without a self-update binary (macOS).
@@ -259,6 +259,13 @@ pub enum Message {
     TabPressed { shift: bool },
 }
 
+/// Result of resolving `/v2/users/me` — just the fields the app acts on.
+#[derive(Debug, Clone)]
+pub struct CurrentUserInfo {
+    pub id: i64,
+    pub is_admin: bool,
+}
+
 // ── App state ─────────────────────────────────────────────────────────────────
 
 pub struct EasyHarvest {
@@ -269,6 +276,10 @@ pub struct EasyHarvest {
     /// Used to filter `/time_entries` requests so that managers only see their
     /// own entries and not those of every member on their projects.
     pub harvest_user_id: Option<i64>,
+    /// Whether the authenticated account has Harvest Administrator access.
+    /// Resolved from `/v2/users/me` on each connect; not persisted, since it
+    /// depends on the live token rather than a saved preference.
+    pub harvest_user_is_admin: bool,
     pub assignments: Vec<ProjectAssignment>,
     pub favorites: Favorites,
     pub current_date: NaiveDate,
@@ -441,6 +452,7 @@ impl EasyHarvest {
             settings,
             client,
             harvest_user_id: None,
+            harvest_user_is_admin: false,
             assignments: Vec::new(),
             favorites,
             current_date: today,
@@ -541,6 +553,7 @@ impl EasyHarvest {
             settings,
             client: None,
             harvest_user_id: None,
+            harvest_user_is_admin: false,
             assignments: Vec::new(),
             favorites: Favorites::default(),
             current_date: today,

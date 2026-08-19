@@ -252,6 +252,33 @@ impl HarvestClient {
         })
         .await
     }
+
+    // --- Users (company directory; Administrator access required) ---
+
+    async fn list_users(&self, page: Option<i64>) -> Result<UsersResponse, HarvestError> {
+        let resp = self
+            .send_with_retry(|| {
+                let mut req = self.request(reqwest::Method::GET, "/users");
+                req = req.query(&[("per_page", "100")]); // Harvest API max is 100
+                if let Some(page) = page {
+                    req = req.query(&[("page", &page.to_string())]);
+                }
+                req
+            })
+            .await?;
+        Ok(resp.json().await?)
+    }
+
+    /// Fetch every user in the company directory, handling pagination.
+    /// Requires the connected account to have Harvest Administrator access —
+    /// non-admin tokens get a 403 from Harvest, surfaced as `HarvestError`.
+    pub async fn list_all_users(&self) -> Result<Vec<User>, HarvestError> {
+        paginate_all(|page| async move {
+            let resp = self.list_users(Some(page)).await?;
+            Ok((resp.users, resp.total_pages))
+        })
+        .await
+    }
 }
 
 /// Drive a Harvest paginated list endpoint to completion.

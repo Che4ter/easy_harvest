@@ -63,8 +63,9 @@ impl EasyHarvest {
             // ── Current user ──
             Message::CurrentUserLoaded(result) => {
                 match result {
-                    Ok(id) => {
-                        self.harvest_user_id = Some(id);
+                    Ok(info) => {
+                        self.harvest_user_id = Some(info.id);
+                        self.harvest_user_is_admin = info.is_admin;
                         // Now that the user ID is known, (re-)dispatch the load
                         // for whichever page is currently active — this covers
                         // both the startup load (initial page is always Day)
