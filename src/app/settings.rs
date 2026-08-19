@@ -592,8 +592,8 @@ impl EasyHarvest {
                 // Years must be loaded sequentially: carryover[N] depends on the
                 // computed result of year N-1.  Fire only the first missing year;
                 // CarryoverSyncLoaded will chain to the next one when it arrives.
-                if let Some(first_missing) = (start..current_year)
-                    .find(|&y| !self.settings.carryover.contains_key(&(y + 1)))
+                if let Some(first_missing) =
+                    crate::stats::first_missing_carryover_year(&self.settings.carryover, start, current_year)
                 {
                     self.load_carryover_sync_task(first_missing)
                 } else {

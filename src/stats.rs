@@ -180,6 +180,22 @@ pub fn year_to_date_balance(
     }
 }
 
+/// Find the earliest year whose *next* year's carryover has not yet been
+/// computed, searching from `start_year` (inclusive) up to `current_year`
+/// (exclusive).
+///
+/// Carryover chains sequentially — `carryover[N]` is derived from the
+/// computed balance of year `N-1` — so only one gap should ever be fetched
+/// at a time; the caller re-invokes this after each fetch completes to walk
+/// forward until every year is caught up.
+pub fn first_missing_carryover_year(
+    carryover: &std::collections::HashMap<i32, crate::state::settings::YearCarryover>,
+    start_year: i32,
+    current_year: i32,
+) -> Option<i32> {
+    (start_year..current_year).find(|&y| !carryover.contains_key(&(y + 1)))
+}
+
 /// Per-month breakdown for all 12 months of `year`.
 ///
 /// `effective_start` mirrors the same parameter in `year_to_date_balance`: when
@@ -600,6 +616,57 @@ mod tests {
 
         // total = −10 + (40 − 64) = −34
         assert!((ytd.total_balance - (-34.0)).abs() < 1e-9);
+    }
+
+    // --- first_missing_carryover_year ---
+
+    fn yc() -> crate::state::settings::YearCarryover {
+        crate::state::settings::YearCarryover::default()
+    }
+
+    #[test]
+    fn first_missing_carryover_year_full_history_returns_none() {
+        let mut carryover = std::collections::HashMap::new();
+        carryover.insert(2024, yc());
+        carryover.insert(2025, yc());
+        carryover.insert(2026, yc());
+        assert_eq!(first_missing_carryover_year(&carryover, 2023, 2026), None);
+    }
+
+    #[test]
+    fn first_missing_carryover_year_empty_history_returns_start_year() {
+        let carryover = std::collections::HashMap::new();
+        assert_eq!(first_missing_carryover_year(&carryover, 2023, 2026), Some(2023));
+    }
+
+    #[test]
+    fn first_missing_carryover_year_multi_year_gap_returns_earliest() {
+        // Employee started in 2023; no carryover has ever been computed.
+        // The gap spans three years (2024, 2025, 2026 all missing) — the
+        // earliest one (2023 → yields 2024) must be picked first so the
+        // chain always advances one year at a time.
+        let carryover = std::collections::HashMap::new();
+        assert_eq!(first_missing_carryover_year(&carryover, 2023, 2026), Some(2023));
+
+        // Once 2024 is filled, the next gap (2025) becomes earliest.
+        let mut carryover = std::collections::HashMap::new();
+        carryover.insert(2024, yc());
+        assert_eq!(first_missing_carryover_year(&carryover, 2023, 2026), Some(2024));
+
+        // Once 2024 and 2025 are filled, only 2026 remains.
+        let mut carryover = std::collections::HashMap::new();
+        carryover.insert(2024, yc());
+        carryover.insert(2025, yc());
+        assert_eq!(first_missing_carryover_year(&carryover, 2023, 2026), Some(2025));
+    }
+
+    #[test]
+    fn first_missing_carryover_year_skips_gap_in_middle_at_earliest_hole() {
+        // A hole earlier in the range must win even if later years exist
+        // (e.g. from a manually entered future carryover).
+        let mut carryover = std::collections::HashMap::new();
+        carryover.insert(2027, yc()); // manually entered far-future entry
+        assert_eq!(first_missing_carryover_year(&carryover, 2023, 2026), Some(2023));
     }
 
     #[test]

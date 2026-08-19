@@ -1399,6 +1399,92 @@ fn carryover_sync_loaded_preserves_user_defined_entry() {
     assert_eq!(entry.overtime_hours, -2.0);
 }
 
+/// Carryover must chain sequentially across *multiple* years, not just one:
+/// a member with several years of history and no prior carryover entries
+/// should have each year filled in, in order, as each background fetch
+/// completes — driven by `CarryoverSyncLoaded` re-invoking `CarryoverSyncStart`
+/// after every insert (`src/app/team.rs`).
+#[test]
+fn carryover_sync_chains_across_multiple_years() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut m = team_member(3, "Carry");
+    m.first_work_day = Some(chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap());
+    app.team_settings.members.push(m);
+
+    let current_year = 2026;
+    let balance_for = |total_balance: f64| crate::stats::YearBalance {
+        period: crate::stats::PeriodStats {
+            total_hours: 0.0,
+            expected_hours: 0.0,
+            balance_hours: 0.0,
+            working_days_expected: 0,
+            days_with_entries: 0,
+        },
+        carryover_hours: 0.0,
+        manual_adjustments_hours: 0.0,
+        total_balance,
+    };
+    let holidays_for = |days_remaining: f64| crate::stats::HolidayStats {
+        days_taken: 0.0,
+        days_remaining,
+        total_days: 25.0,
+    };
+
+    // Before any sync, the whole 2023..2026 range is a gap; 2023 is earliest.
+    let member = app.team_settings.member(3).unwrap();
+    assert_eq!(
+        crate::stats::first_missing_carryover_year(&member.carryover, 2023, current_year),
+        Some(2023)
+    );
+
+    // Step 1: 2023's fetch completes → fills carryover[2024].
+    let _ = app.update_team(TeamMsg::CarryoverSyncLoaded(
+        3, 2023,
+        Ok((balance_for(10.0), holidays_for(3.0))),
+    ));
+    let member = app.team_settings.member(3).unwrap();
+    assert_eq!(member.carryover[&2024].overtime_hours, 10.0);
+    assert_eq!(
+        crate::stats::first_missing_carryover_year(&member.carryover, 2023, current_year),
+        Some(2024),
+        "chain must advance to the next gap after 2024 is filled"
+    );
+
+    // Step 2: 2024's fetch completes → fills carryover[2025].
+    let _ = app.update_team(TeamMsg::CarryoverSyncLoaded(
+        3, 2024,
+        Ok((balance_for(15.0), holidays_for(2.0))),
+    ));
+    let member = app.team_settings.member(3).unwrap();
+    assert_eq!(member.carryover[&2025].overtime_hours, 15.0);
+    assert_eq!(
+        crate::stats::first_missing_carryover_year(&member.carryover, 2023, current_year),
+        Some(2025),
+        "chain must advance to the next gap after 2025 is filled"
+    );
+
+    // Step 3: 2025's fetch completes → fills carryover[2026], catching up to current_year.
+    let _ = app.update_team(TeamMsg::CarryoverSyncLoaded(
+        3, 2025,
+        Ok((balance_for(-5.0), holidays_for(0.0))),
+    ));
+    let member = app.team_settings.member(3).unwrap();
+    assert_eq!(member.carryover[&2026].overtime_hours, -5.0);
+    assert_eq!(
+        crate::stats::first_missing_carryover_year(&member.carryover, 2023, current_year),
+        None,
+        "member must be fully caught up after all three years chain through"
+    );
+
+    // Every year's distinct value survived independently — no overwriting
+    // across the chain.
+    let member = app.team_settings.member(3).unwrap();
+    assert_eq!(member.carryover[&2024].overtime_hours, 10.0);
+    assert_eq!(member.carryover[&2025].overtime_hours, 15.0);
+    assert_eq!(member.carryover[&2026].overtime_hours, -5.0);
+}
+
 #[test]
 fn adj_submit_rejects_invalid_form_without_mutating_store() {
     let dir = tempfile::tempdir().unwrap();

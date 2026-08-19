@@ -252,7 +252,7 @@ impl EasyHarvest {
                 let Some(member) = self.team_settings.member(id) else { return Task::none(); };
                 let Some(fwd) = member.first_work_day else { return Task::none(); };
                 let start = fwd.year();
-                match (start..current_year).find(|&y| !member.carryover.contains_key(&(y + 1))) {
+                match crate::stats::first_missing_carryover_year(&member.carryover, start, current_year) {
                     Some(first_missing) => self.load_team_carryover_sync_task(member, first_missing),
                     None => Task::none(),
                 }
