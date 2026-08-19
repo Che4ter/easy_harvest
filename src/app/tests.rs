@@ -1360,6 +1360,45 @@ fn work_percentage_save_rejects_out_of_range_input() {
 }
 
 #[test]
+fn first_work_day_detected_sets_member_and_seeds_carryover() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(7, "Alex"));
+    let detected = NaiveDate::from_ymd_opt(2026, 3, 17).unwrap();
+
+    let _ = app.update_team(TeamMsg::FirstWorkDayDetected(7, Ok(Some(detected))));
+
+    assert_eq!(app.team_settings.member(7).unwrap().first_work_day, Some(detected));
+    assert!(app.team_settings.member(7).unwrap().carryover.contains_key(&2026));
+    let reloaded = crate::state::team::TeamSettings::load(dir.path());
+    assert_eq!(reloaded.member(7).unwrap().first_work_day, Some(detected));
+}
+
+#[test]
+fn first_work_day_detected_none_leaves_member_unset_without_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(7, "Alex"));
+
+    let _ = app.update_team(TeamMsg::FirstWorkDayDetected(7, Ok(None)));
+
+    assert_eq!(app.team_settings.member(7).unwrap().first_work_day, None);
+    assert!(app.error_banner.is_none(), "no entries yet is expected, not an error");
+}
+
+#[test]
+fn first_work_day_detected_err_sets_error_banner() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(7, "Alex"));
+
+    let _ = app.update_team(TeamMsg::FirstWorkDayDetected(7, Err("boom".into())));
+
+    assert_eq!(app.team_settings.member(7).unwrap().first_work_day, None);
+    assert!(app.error_banner.is_some());
+}
+
+#[test]
 fn member_stats_loaded_ignores_stale_generation() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());

@@ -392,6 +392,32 @@ impl EasyHarvest {
         )
     }
 
+    /// Detect a new team member's `first_work_day` from their earliest booked
+    /// time entry, so newly added members don't start out accruing negative
+    /// overtime for days before they actually started. `Ok(None)` (no entries
+    /// yet) is expected for a brand-new hire and is not an error.
+    pub(super) fn detect_member_first_work_day_task(&self, user_id: i64) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let today = Local::now().naive_local().date().format("%Y-%m-%d").to_string();
+        Task::perform(
+            async move {
+                let entries = client
+                    .list_all_time_entries(Some(user_id), "2000-01-01", &today)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok(entries
+                    .iter()
+                    .filter_map(|e| NaiveDate::parse_from_str(&e.spent_date, "%Y-%m-%d").ok())
+                    .min())
+            },
+            move |result: Result<Option<NaiveDate>, String>| {
+                Message::Team(TeamMsg::FirstWorkDayDetected(user_id, result))
+            },
+        )
+    }
+
     pub(super) fn load_vacation_task(&self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();

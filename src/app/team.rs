@@ -70,6 +70,9 @@ pub enum TeamMsg {
     ImpersonationExit,
     FirstWorkDayInputChanged(i64, String),
     FirstWorkDaySave(i64),
+    /// Auto-detect result for a newly added member's `first_work_day`,
+    /// dispatched automatically right after `AddMember` — no manual button.
+    FirstWorkDayDetected(i64, Result<Option<NaiveDate>, String>),
     WorkPercentageInputChanged(i64, String),
     WorkPercentageSave(i64),
 
@@ -198,7 +201,10 @@ impl EasyHarvest {
                     return Task::none();
                 }
                 self.team.add_form = TeamMemberForm::default();
-                Task::done(Message::Team(TeamMsg::Refresh))
+                Task::batch(vec![
+                    Task::done(Message::Team(TeamMsg::Refresh)),
+                    self.detect_member_first_work_day_task(harvest_user_id),
+                ])
             }
 
             TeamMsg::RemoveMember(id) => {
@@ -302,6 +308,27 @@ impl EasyHarvest {
                 self.save_team_or_warn();
                 self.team.first_work_day_inputs.remove(&id);
                 self.update_team(TeamMsg::CarryoverSyncStart(id))
+            }
+
+            TeamMsg::FirstWorkDayDetected(id, result) => {
+                match result {
+                    Ok(Some(date)) => {
+                        let Some(member) = self.team_settings.member_mut(id) else {
+                            return Task::none();
+                        };
+                        member.first_work_day = Some(date);
+                        member.carryover.entry(date.year()).or_default();
+                        self.save_team_or_warn();
+                        self.update_team(TeamMsg::CarryoverSyncStart(id))
+                    }
+                    // No entries yet — expected for a brand-new hire, not an error.
+                    Ok(None) => Task::none(),
+                    Err(e) => {
+                        self.error_banner =
+                            Some(format!("Auto-detect first work day failed: {e}"));
+                        Task::none()
+                    }
+                }
             }
 
             TeamMsg::WorkPercentageInputChanged(id, v) => {
