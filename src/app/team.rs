@@ -210,7 +210,13 @@ impl EasyHarvest {
                 self.team.r#gen += 1;
                 self.save_team_or_warn();
                 if self.impersonating == Some(id) {
-                    self.impersonating = None;
+                    // Delegate to the real exit path: clearing the flag alone
+                    // would leave the removed member's cached entries, vacation
+                    // and stats on screen with no read-only banner and every
+                    // mutation control re-enabled. `ImpersonationExit` is keyed
+                    // purely off `self.impersonating`, so running it after the
+                    // member is gone from the roster is safe.
+                    return self.update_team(TeamMsg::ImpersonationExit);
                 }
                 Task::none()
             }

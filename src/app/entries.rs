@@ -300,6 +300,10 @@ impl EasyHarvest {
             }
 
             EntryMsg::Created(result) => {
+                // A create submitted as the lead can still be in flight when
+                // impersonation starts; without this guard the response would
+                // push the lead's own entry into the member's displayed list.
+                if self.impersonating.is_some() { return Task::none(); }
                 match result {
                     Ok(entry) => {
                         self.entries.push(entry);
@@ -317,6 +321,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::Updated(result) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 match result {
                     Ok(updated) => {
                         if let Some(pos) =
@@ -368,6 +373,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::Deleted(result) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 match result {
                     Ok(id) => self.entries.retain(|e| e.id != id),
                     Err(e) => self.error_banner = Some(e),
@@ -398,6 +404,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::TimerStarted(result) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 match result {
                     Ok(updated) => {
                         // M4-F5: discard responses for entries that belong to a
@@ -424,6 +431,7 @@ impl EasyHarvest {
             }
 
             EntryMsg::TimerStopped(result) => {
+                if self.impersonating.is_some() { return Task::none(); }
                 match result {
                     Ok(updated) => {
                         // M4-F5: discard stale responses for a different date.

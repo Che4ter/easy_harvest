@@ -1471,6 +1471,95 @@ fn remove_member_leaves_other_impersonation_untouched() {
     assert_eq!(app.impersonating, Some(9));
 }
 
+// Removing the member currently being impersonated must run the *full*
+// exit path, not just clear the flag: otherwise the app keeps rendering the
+// removed member's cached entries/vacation/stats with `impersonating == None`
+// — no read-only banner, every mutation control re-enabled, against data that
+// belongs to somebody else.
+#[test]
+fn remove_member_of_impersonated_member_performs_full_impersonation_exit() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.team_settings.members.push(team_member(9, "Sam"));
+    app.impersonating = Some(9);
+
+    // Seed the cached state that belongs to the impersonated member.
+    app.entries = vec![make_entry(1, 10, 1, 5.0, false)];
+    app.vacation.entries = vec![make_entry(2, 10, 1, 8.0, false)];
+    app.vacation.summary = Some(crate::app::VacationSummary {
+        used_days: 1.0,
+        booked_days: 1.0,
+        days_remaining: 24.0,
+        total_days: 25.0,
+        carryover_days: 0.0,
+    });
+    app.year_balance = Some(zero_balance());
+    app.holiday_stats = Some(zero_holiday_stats());
+    app.month_summaries = Some(Vec::new());
+    app.entry_form = Some(EntryForm::new());
+    app.pending_delete = Some(1);
+    app.overtime_adj_form = Some(OvertimeAdjustmentForm::default());
+    app.vacation.form = Some(VacationForm::new());
+
+    let before_entries = app.entries_gen;
+    let before_stats = app.stats_gen;
+    let before_vacation = app.vacation_gen;
+
+    let _ = app.update_team(TeamMsg::RemoveMember(9));
+
+    assert_eq!(app.impersonating, None);
+    assert!(app.team_settings.member(9).is_none());
+    // Everything ImpersonationExit clears must actually be cleared.
+    assert!(app.entries.is_empty(), "cached entries of the removed member must be dropped");
+    assert!(app.vacation.entries.is_empty());
+    assert!(app.vacation.summary.is_none());
+    assert!(app.year_balance.is_none());
+    assert!(app.holiday_stats.is_none());
+    assert!(app.month_summaries.is_none());
+    assert!(app.entry_form.is_none());
+    assert!(app.pending_delete.is_none());
+    assert!(app.overtime_adj_form.is_none());
+    assert!(app.vacation.form.is_none());
+    assert_eq!(app.entries_gen, before_entries + 1);
+    assert_eq!(app.stats_gen, before_stats + 1);
+    assert_eq!(app.vacation_gen, before_vacation + 1);
+}
+
+// ── effective_user_id: the branch's most safety-critical resolution ──────────
+//
+// `effective_user_id()` decides *whose* Harvest data every fetch targets.
+// Both call sites (`load_entries_task`, `load_vacation_task`) sit behind a
+// `self.client.is_none()` early return, so no state-machine test can reach
+// them; these test the resolution directly instead.
+
+#[test]
+fn effective_user_id_prefers_impersonated_member() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.harvest_user_id = Some(1);
+    app.impersonating = Some(9);
+
+    assert_eq!(app.effective_user_id(), Some(9),
+        "while impersonating, fetches must target the member, not the lead");
+
+    // Also true when the lead's own id was never resolved.
+    app.harvest_user_id = None;
+    assert_eq!(app.effective_user_id(), Some(9));
+}
+
+#[test]
+fn effective_user_id_falls_back_to_own_id_when_not_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = None;
+    app.harvest_user_id = Some(1);
+
+    assert_eq!(app.effective_user_id(), Some(1));
+
+    app.harvest_user_id = None;
+    assert_eq!(app.effective_user_id(), None);
+}
+
 #[test]
 fn impersonated_member_looks_up_by_id() {
     let dir = tempfile::tempdir().unwrap();
@@ -1529,14 +1618,22 @@ fn page_changed_to_billable_still_works_when_not_impersonating() {
 #[test]
 fn load_entries_task_is_noop_without_client_regardless_of_impersonation() {
     // load_entries_task always short-circuits on `self.client.is_none()`
-    // (test_instance has no client) — this documents that the
-    // impersonation user_id swap is reached only once a client exists,
-    // and that swapping it doesn't panic or change this early-return.
+    // (test_instance has no client), so the fetch itself can't be observed
+    // here. What *is* observable is the id the task would fetch for — see
+    // `effective_user_id_prefers_impersonated_member` for the direct
+    // coverage of that resolution.
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());
     app.team_settings.members.push(team_member(9, "Sam"));
+    app.harvest_user_id = Some(1);
     app.impersonating = Some(9);
+
+    assert_eq!(app.effective_user_id(), Some(9),
+        "with a client, this task would fetch the impersonated member's entries");
+
     let _ = app.load_entries_task();
+
+    assert!(app.entries.is_empty(), "no client ⇒ nothing is fetched or applied");
 }
 
 #[test]
@@ -1610,6 +1707,38 @@ fn entry_timer_start_stop_no_op_while_impersonating() {
     let _ = app.update_entries(EntryMsg::TimerStop(1));
 
     assert!(!app.entries[0].is_running);
+}
+
+// A lead-initiated Submit can still be in flight (Created not yet delivered)
+// when the lead clicks Impersonate. Without a guard on the *response* arm the
+// lead's own new entry is pushed into what is now the impersonated member's
+// entry list, indistinguishable from the member's own data. Same race class as
+// `vacation_entries_created_no_ops_while_impersonating`.
+#[test]
+fn entry_created_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.impersonating = Some(9);
+
+    let _ = app.update_entries(EntryMsg::Created(Ok(make_entry(77, 10, 1, 3.0, false))));
+
+    assert!(app.entries.is_empty(),
+        "an in-flight create response must not land in the impersonated member's list");
+}
+
+// Symmetric to the above: an in-flight Delete response must not retain() over
+// the impersonated member's displayed entries.
+#[test]
+fn entry_deleted_no_ops_while_impersonating() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.entries = vec![make_entry(1, 10, 1, 5.0, false)];
+    app.impersonating = Some(9);
+
+    let _ = app.update_entries(EntryMsg::Deleted(Ok(1)));
+
+    assert_eq!(app.entries.len(), 1,
+        "an in-flight delete response must not remove an impersonated member's entry");
 }
 
 #[test]
@@ -2069,14 +2198,18 @@ fn vacation_form_submit_no_ops_while_impersonating() {
 fn vacation_delete_entry_no_ops_while_impersonating() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());
+    app.vacation.entries = vec![make_entry(1, 1, 1, 8.0, false)];
     app.impersonating = Some(9);
 
-    let task = app.update_vacation(VacationMsg::DeleteEntry(1));
-    // No client is configured in test_instance either way, but the guard
-    // must return before even checking for a client so this documents
-    // intent; assert no local state changed as a proxy for "no-op".
-    let _ = task;
-    assert!(app.vacation.entries.is_empty());
+    let _ = app.update_vacation(VacationMsg::DeleteEntry(1));
+
+    // Pins the invariant that DeleteEntry never removes locally — it only
+    // fires the request; removal happens in EntryDeleted. Note this cannot
+    // discriminate on the impersonation guard itself (DeleteEntry touches no
+    // local state either way, and test_instance has no client); the guard is
+    // covered by `vacation_entry_deleted_no_ops_while_impersonating` below.
+    assert_eq!(app.vacation.entries.len(), 1,
+        "DeleteEntry must not optimistically remove the entry locally");
 }
 
 #[test]
