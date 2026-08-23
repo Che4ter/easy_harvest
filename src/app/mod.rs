@@ -250,7 +250,7 @@ pub enum Message {
     // User clicked "Update now" (valid from Available or Failed states)
     StartUpdate,
     // Download + checksum fetch finished: Ok((bytes, expected_checksum_hex))
-    UpdateDownloaded(Result<(Vec<u8>, String), String>),
+    UpdateDownloaded(Result<Vec<u8>, String>),
     // Binary replace + relaunch finished: Ok(()) means the new process was
     // spawned and this process should now quit.
     UpdateInstalled(Result<(), InstallError>),

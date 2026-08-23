@@ -171,11 +171,7 @@ impl EasyHarvest {
                 };
                 self.update_state = UpdateState::Downloading { assets: assets.clone() };
                 Task::perform(
-                    async move {
-                        let bytes = crate::update_installer::download_bytes(&assets.binary_url).await?;
-                        let checksum = crate::update_installer::download_checksum(&assets.checksum_url).await?;
-                        Ok::<(Vec<u8>, String), String>((bytes, checksum))
-                    },
+                    async move { crate::update_installer::download_bytes(&assets.binary_url).await },
                     Message::UpdateDownloaded,
                 )
             }
@@ -186,8 +182,8 @@ impl EasyHarvest {
                     _ => return Task::none(),
                 };
                 match result {
-                    Ok((bytes, expected_hex)) => {
-                        if !crate::update_installer::verify_checksum(&bytes, &expected_hex) {
+                    Ok(bytes) => {
+                        if !crate::update_installer::verify_checksum(&bytes, &assets.expected_sha256) {
                             self.update_state = UpdateState::Failed {
                                 reason: "Downloaded update failed verification — try again or download manually".into(),
                                 assets,

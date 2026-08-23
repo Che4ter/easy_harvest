@@ -5,7 +5,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateAssets {
     pub binary_url: String,
-    pub checksum_url: String,
+    pub expected_sha256: String,
 }
 
 fn platform_asset_name() -> Option<&'static str> {
@@ -18,29 +18,29 @@ fn platform_asset_name() -> Option<&'static str> {
     }
 }
 
-fn asset_url(assets: &[Value], name: &str) -> Option<String> {
-    assets
-        .iter()
-        .find(|a| a.get("name").and_then(Value::as_str) == Some(name))
-        .and_then(|a| a.get("browser_download_url"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
+fn matching_asset<'a>(assets: &'a [Value], name: &str) -> Option<&'a Value> {
+    assets.iter().find(|a| a.get("name").and_then(Value::as_str) == Some(name))
 }
 
 /// Matches a release's `assets[]` JSON against an explicit binary name,
 /// rather than reading it from `platform_asset_name` itself, so it's
 /// unit-testable for every platform regardless of which OS the tests
 /// happen to run on.
+///
+/// Reads the SHA256 straight off GitHub's own `digest` field for the asset
+/// (format `sha256:<hex>`) instead of a separate `.sha256` sidecar asset —
+/// GitHub computes and serves this for every uploaded release asset, so
+/// there's nothing left for CI to generate or the client to fetch twice.
 fn find_update_assets_for(assets: &[Value], binary_name: &str) -> Option<UpdateAssets> {
-    let checksum_name = format!("{binary_name}.sha256");
-    Some(UpdateAssets {
-        binary_url: asset_url(assets, binary_name)?,
-        checksum_url: asset_url(assets, &checksum_name)?,
-    })
+    let asset = matching_asset(assets, binary_name)?;
+    let binary_url = asset.get("browser_download_url")?.as_str()?.to_owned();
+    let expected_sha256 = asset.get("digest")?.as_str()?.strip_prefix("sha256:")?.to_owned();
+    Some(UpdateAssets { binary_url, expected_sha256 })
 }
 
-/// Find this platform's binary + `.sha256` sidecar in a release's `assets[]`
-/// array. Returns `None` on platforms with no self-update binary (macOS).
+/// Find this platform's binary in a release's `assets[]` array. Returns
+/// `None` on platforms with no self-update binary (macOS), or if the asset
+/// or its digest is missing/malformed.
 pub fn find_update_assets(assets: &[Value]) -> Option<UpdateAssets> {
     find_update_assets_for(assets, platform_asset_name()?)
 }
@@ -76,11 +76,6 @@ async fn http_get(url: &str, timeout_secs: u64) -> Result<reqwest::Response, Str
 pub async fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
     let resp = http_get(url, 300).await?;
     resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
-}
-
-pub async fn download_checksum(url: &str) -> Result<String, String> {
-    let resp = http_get(url, 30).await?;
-    resp.text().await.map_err(|e| e.to_string())
 }
 
 // ── Install + relaunch ───────────────────────────────────────────────────────
@@ -130,40 +125,38 @@ mod tests {
 
     fn sample_assets() -> Vec<Value> {
         vec![
-            json!({"name": "easy_harvest-linux-x86_64", "browser_download_url": "https://example.com/linux-bin"}),
-            json!({"name": "easy_harvest-linux-x86_64.sha256", "browser_download_url": "https://example.com/linux-bin.sha256"}),
-            json!({"name": "easy_harvest-windows-x86_64.exe", "browser_download_url": "https://example.com/win-bin"}),
-            json!({"name": "easy_harvest-windows-x86_64.exe.sha256", "browser_download_url": "https://example.com/win-bin.sha256"}),
-            json!({"name": "easy_harvest-macos-aarch64.zip", "browser_download_url": "https://example.com/mac-zip"}),
+            json!({"name": "easy_harvest-linux-x86_64", "browser_download_url": "https://example.com/linux-bin", "digest": "sha256:aaaa"}),
+            json!({"name": "easy_harvest-windows-x86_64.exe", "browser_download_url": "https://example.com/win-bin", "digest": "sha256:bbbb"}),
+            json!({"name": "easy_harvest-macos-aarch64.zip", "browser_download_url": "https://example.com/mac-zip", "digest": "sha256:cccc"}),
         ]
     }
 
     #[test]
-    fn finds_linux_binary_and_checksum() {
+    fn finds_linux_binary_and_digest() {
         let result = find_update_assets_for(&sample_assets(), "easy_harvest-linux-x86_64");
         assert_eq!(
             result,
             Some(UpdateAssets {
                 binary_url: "https://example.com/linux-bin".into(),
-                checksum_url: "https://example.com/linux-bin.sha256".into(),
+                expected_sha256: "aaaa".into(),
             })
         );
     }
 
     #[test]
-    fn finds_windows_binary_and_checksum() {
+    fn finds_windows_binary_and_digest() {
         let result = find_update_assets_for(&sample_assets(), "easy_harvest-windows-x86_64.exe");
         assert_eq!(
             result,
             Some(UpdateAssets {
                 binary_url: "https://example.com/win-bin".into(),
-                checksum_url: "https://example.com/win-bin.sha256".into(),
+                expected_sha256: "bbbb".into(),
             })
         );
     }
 
     #[test]
-    fn missing_checksum_sidecar_returns_none() {
+    fn missing_digest_returns_none() {
         let assets = vec![json!({
             "name": "easy_harvest-linux-x86_64",
             "browser_download_url": "https://example.com/linux-bin"
@@ -172,10 +165,21 @@ mod tests {
     }
 
     #[test]
+    fn malformed_digest_returns_none() {
+        let assets = vec![json!({
+            "name": "easy_harvest-linux-x86_64",
+            "browser_download_url": "https://example.com/linux-bin",
+            "digest": "md5:aaaa"
+        })];
+        assert_eq!(find_update_assets_for(&assets, "easy_harvest-linux-x86_64"), None);
+    }
+
+    #[test]
     fn missing_binary_returns_none() {
         let assets = vec![json!({
-            "name": "easy_harvest-linux-x86_64.sha256",
-            "browser_download_url": "https://example.com/linux-bin.sha256"
+            "name": "some-other-asset",
+            "browser_download_url": "https://example.com/other",
+            "digest": "sha256:aaaa"
         })];
         assert_eq!(find_update_assets_for(&assets, "easy_harvest-linux-x86_64"), None);
     }

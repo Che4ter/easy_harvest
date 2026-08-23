@@ -110,18 +110,17 @@ jobs:
         run: strip target/release/easy_harvest
 
       # ── Package ─────────────────────────────────────────────────────────────
+      # No separate .sha256 sidecar is generated here — GitHub computes and
+      # serves a `digest` field for every uploaded release asset, and the
+      # in-app updater (src/update_installer.rs) reads that directly.
       - name: Package (Linux)
         if: runner.os == 'Linux'
-        run: |
-          cp target/release/easy_harvest ${{ matrix.asset }}
-          sha256sum ${{ matrix.asset }} | cut -d' ' -f1 > ${{ matrix.asset }}.sha256
+        run: cp target/release/easy_harvest ${{ matrix.asset }}
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          Copy-Item target\release\easy_harvest.exe ${{ matrix.asset }}
-          (Get-FileHash ${{ matrix.asset }} -Algorithm SHA256).Hash.ToLower() | Out-File -NoNewline ${{ matrix.asset }}.sha256
+        run: Copy-Item target\release\easy_harvest.exe ${{ matrix.asset }}
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
@@ -144,9 +143,7 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
-          files: |
-            ${{ matrix.asset }}
-            ${{ matrix.asset }}.sha256
+          files: ${{ matrix.asset }}
           # Tag suffix is the single source of truth: a tag containing '-'
           # (e.g. v1.6.0-beta.1) is published as a prerelease. This mirrors the
           # app's parse_semver, which ignores such tags, so CI and the in-app
