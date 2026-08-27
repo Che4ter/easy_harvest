@@ -492,28 +492,28 @@ fn wd_secondary_btn(label: &'static str, msg: Message) -> Element<'static, Messa
 // ── Entry list ────────────────────────────────────────────────────────────────
 
 fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
-    let add_btn = button(
-        row![
-            text("+").font(FONT_SEMIBOLD).size(16).color(Color::WHITE),
-            Space::new().width(6).height(6),
-            text("Add Entry").font(FONT_MEDIUM).size(14).color(Color::WHITE),
-        ]
-        .align_y(Alignment::Center),
-    )
-    .style(super::accent_btn_style)
-    .padding([8, 18])
-    .on_press_maybe(state.impersonating.is_none().then_some(Message::Entry(Box::new(EntryMsg::ShowForm))));
+    let impersonating = state.impersonating.is_some();
 
-    let header = container(
-        row![
-            section_heading("Time Entries"),
-            Space::new().width(Length::Fill),
-            add_btn,
-        ]
-        .align_y(Alignment::Center),
-    )
-    .padding(Padding::ZERO.bottom(12))
-    .width(Length::Fill);
+    let mut header_row = row![section_heading("Time Entries"), Space::new().width(Length::Fill)]
+        .align_y(Alignment::Center);
+    if !impersonating {
+        let add_btn = button(
+            row![
+                text("+").font(FONT_SEMIBOLD).size(16).color(Color::WHITE),
+                Space::new().width(6).height(6),
+                text("Add Entry").font(FONT_MEDIUM).size(14).color(Color::WHITE),
+            ]
+            .align_y(Alignment::Center),
+        )
+        .style(super::accent_btn_style)
+        .padding([8, 18])
+        .on_press(Message::Entry(Box::new(EntryMsg::ShowForm)));
+        header_row = header_row.push(add_btn);
+    }
+
+    let header = container(header_row)
+        .padding(Padding::ZERO.bottom(12))
+        .width(Length::Fill);
 
     let entries: Element<Message> = if state.loading {
         container(
@@ -533,7 +533,11 @@ fn entry_list(state: &EasyHarvest) -> Element<'_, Message> {
                     .font(FONT_MEDIUM)
                     .size(14)
                     .color(TEXT_MUTED),
-                text("Click + Add Entry to start tracking")
+                text(if impersonating {
+                    "Read-only view — nothing tracked yet"
+                } else {
+                    "Click + Add Entry to start tracking"
+                })
                     .font(FONT_REGULAR)
                     .size(12)
                     .color(super::with_alpha(TEXT_MUTED, 0.6)),

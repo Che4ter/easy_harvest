@@ -214,24 +214,25 @@ fn build_adjustments_section(state: &EasyHarvest, year: i32) -> Element<'_, Mess
     };
     let impersonating = state.impersonating.is_some();
 
-    let toggle_btn: Element<Message> = if state.overtime_adj_form.is_some() {
-        Element::from(
+    let toggle_btn: Option<Element<Message>> = if impersonating {
+        None
+    } else if state.overtime_adj_form.is_some() {
+        Some(Element::from(
             outline_btn_sm("Cancel")
                 .on_press(Message::Stats(StatsMsg::HideAdjForm)),
-        )
+        ))
     } else {
-        Element::from(
+        Some(Element::from(
             outline_btn_sm("+ Add Adjustment")
-                .on_press_maybe((!impersonating).then_some(Message::Stats(StatsMsg::ShowAdjForm))),
-        )
+                .on_press(Message::Stats(StatsMsg::ShowAdjForm)),
+        ))
     };
 
-    let heading_row = row![
-        section_heading("Adjustments"),
-        Space::new().width(Length::Fill),
-        toggle_btn,
-    ]
-    .align_y(Alignment::Center);
+    let mut heading_row = row![section_heading("Adjustments"), Space::new().width(Length::Fill)]
+        .align_y(Alignment::Center);
+    if let Some(btn) = toggle_btn {
+        heading_row = heading_row.push(btn);
+    }
 
     let mut content = column![heading_row].spacing(8);
 

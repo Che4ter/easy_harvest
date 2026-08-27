@@ -26,7 +26,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         Message::Vacation(VacationMsg::ShowForm)
     };
 
-    let year_row = row![
+    let mut year_row = row![
         nav_arrow_btn("‹").on_press(Message::Vacation(VacationMsg::YearPrev)),
         Space::new().width(10).height(10),
         text(year.to_string())
@@ -39,10 +39,11 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         refresh_btn("↻  Refresh").on_press_maybe(
             if state.loading { None } else { Some(Message::Vacation(VacationMsg::Refresh)) }
         ),
-        Space::new().width(8).height(8),
-        primary_btn(add_label).on_press_maybe((!impersonating).then_some(add_msg)),
     ]
     .align_y(Alignment::Center);
+    if !impersonating {
+        year_row = year_row.push(Space::new().width(8).height(8)).push(primary_btn(add_label).on_press(add_msg));
+    }
 
     let (expected_per_day, task_ids): (f64, Vec<i64>) = match state.impersonated_member() {
         Some(member) => (
