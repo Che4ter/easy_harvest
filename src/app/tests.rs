@@ -654,6 +654,7 @@ fn carryover_sync_loaded_skips_user_defined() {
 
     // Sync completes for year 2025; handler would normally write into 2026.
     let _ = app.update_settings(SettingsMsg::CarryoverSyncLoaded(
+        app.carryover_sync_gen,
         2025,
         Ok((zero_balance(), zero_holiday_stats())),
     ));
@@ -682,6 +683,7 @@ fn carryover_sync_loaded_err_inserts_tombstone() {
 
     // Simulate a network failure while syncing year 2025.
     let _ = app.update_settings(SettingsMsg::CarryoverSyncLoaded(
+        app.carryover_sync_gen,
         2025,
         Err("network error".to_string()),
     ));
@@ -717,6 +719,7 @@ fn carryover_sync_loaded_err_does_not_overwrite_user_defined() {
 
     // Sync fails for 2025.
     let _ = app.update_settings(SettingsMsg::CarryoverSyncLoaded(
+        app.carryover_sync_gen,
         2025,
         Err("timeout".to_string()),
     ));
@@ -1949,6 +1952,74 @@ fn carryover_delete_removes_entry() {
     assert!(!app.team_settings.member(3).unwrap().carryover.contains_key(&2026));
 }
 
+/// Correcting a team member's first_work_day to an earlier date must purge
+/// stale auto-computed carryover entries left from the old date, otherwise
+/// first_missing_carryover_year sees them as "already done" and the chain
+/// never recomputes them — silently understating overtime forever.
+#[test]
+fn first_work_day_save_purges_stale_carryover_on_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut m = team_member(3, "Carry");
+    m.first_work_day = Some(chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap());
+    // Stale auto-computed entries from the original (wrong) first_work_day.
+    m.carryover.insert(2021, crate::state::settings::YearCarryover {
+        overtime_hours: 5.0, ..Default::default()
+    });
+    // A manually entered value — must survive the correction.
+    m.carryover.insert(2022, crate::state::settings::YearCarryover {
+        overtime_hours: 99.0, is_user_defined: true, ..Default::default()
+    });
+    app.team_settings.members.push(m);
+
+    app.team.first_work_day_inputs.insert(3, "01.01.2018".into());
+    let _ = app.update_team(TeamMsg::FirstWorkDaySave(3));
+
+    let member = app.team_settings.member(3).unwrap();
+    assert_eq!(member.first_work_day, Some(chrono::NaiveDate::from_ymd_opt(2018, 1, 1).unwrap()));
+    assert!(
+        !member.carryover.contains_key(&2021),
+        "stale auto-computed entry from the old first_work_day must be purged"
+    );
+    assert!(
+        member.carryover.contains_key(&2022) && member.carryover[&2022].overtime_hours == 99.0,
+        "user-defined entry must survive the correction"
+    );
+}
+
+#[test]
+fn first_work_day_detected_purges_stale_carryover_on_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut m = team_member(3, "Carry");
+    m.first_work_day = Some(chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap());
+    // Stale auto-computed entries from the original (wrong) first_work_day.
+    m.carryover.insert(2021, crate::state::settings::YearCarryover {
+        overtime_hours: 5.0, ..Default::default()
+    });
+    // A manually entered value — must survive the correction.
+    m.carryover.insert(2022, crate::state::settings::YearCarryover {
+        overtime_hours: 99.0, is_user_defined: true, ..Default::default()
+    });
+    app.team_settings.members.push(m);
+
+    let _ = app.update_team(TeamMsg::FirstWorkDayDetected(
+        3,
+        Ok(Some(chrono::NaiveDate::from_ymd_opt(2018, 1, 1).unwrap())),
+    ));
+
+    let member = app.team_settings.member(3).unwrap();
+    assert_eq!(member.first_work_day, Some(chrono::NaiveDate::from_ymd_opt(2018, 1, 1).unwrap()));
+    assert!(
+        !member.carryover.contains_key(&2021),
+        "stale auto-computed entry from the old first_work_day must be purged"
+    );
+    assert!(
+        member.carryover.contains_key(&2022) && member.carryover[&2022].overtime_hours == 99.0,
+        "user-defined entry must survive the correction"
+    );
+}
+
 #[test]
 fn carryover_sync_loaded_preserves_user_defined_entry() {
     let dir = tempfile::tempdir().unwrap();
@@ -1961,7 +2032,7 @@ fn carryover_sync_loaded_preserves_user_defined_entry() {
     app.team_settings.members.push(m);
 
     let _ = app.update_team(TeamMsg::CarryoverSyncLoaded(
-        3, 2025,
+        3, 0, 2025,
         Ok((crate::stats::YearBalance {
             period: crate::stats::PeriodStats {
                 total_hours: 0.0,
@@ -2020,7 +2091,7 @@ fn carryover_sync_chains_across_multiple_years() {
 
     // Step 1: 2023's fetch completes → fills carryover[2024].
     let _ = app.update_team(TeamMsg::CarryoverSyncLoaded(
-        3, 2023,
+        3, 0, 2023,
         Ok((balance_for(10.0), holidays_for(3.0))),
     ));
     let member = app.team_settings.member(3).unwrap();
@@ -2033,7 +2104,7 @@ fn carryover_sync_chains_across_multiple_years() {
 
     // Step 2: 2024's fetch completes → fills carryover[2025].
     let _ = app.update_team(TeamMsg::CarryoverSyncLoaded(
-        3, 2024,
+        3, 0, 2024,
         Ok((balance_for(15.0), holidays_for(2.0))),
     ));
     let member = app.team_settings.member(3).unwrap();
@@ -2046,7 +2117,7 @@ fn carryover_sync_chains_across_multiple_years() {
 
     // Step 3: 2025's fetch completes → fills carryover[2026], catching up to current_year.
     let _ = app.update_team(TeamMsg::CarryoverSyncLoaded(
-        3, 2025,
+        3, 0, 2025,
         Ok((balance_for(-5.0), holidays_for(0.0))),
     ));
     let member = app.team_settings.member(3).unwrap();
@@ -2063,6 +2134,86 @@ fn carryover_sync_chains_across_multiple_years() {
     assert_eq!(member.carryover[&2024].overtime_hours, 10.0);
     assert_eq!(member.carryover[&2025].overtime_hours, 15.0);
     assert_eq!(member.carryover[&2026].overtime_hours, -5.0);
+}
+
+/// A `CarryoverSyncLoaded` response from a chain that was superseded by a
+/// newer purge (e.g. a second first-work-day edit before the first chain
+/// finished) must be discarded, not reinserted — otherwise the stale value
+/// sits at a year `first_missing_carryover_year` will never revisit.
+#[test]
+fn carryover_sync_loaded_with_stale_gen_is_discarded() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut m = team_member(3, "Carry");
+    m.first_work_day = Some(chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap());
+    app.team_settings.members.push(m);
+
+    // A newer chain has already started (e.g. via FirstWorkDaySave), bumping
+    // the gen past what this in-flight response was launched under.
+    app.team.carryover_sync_gen.insert(3, 1);
+
+    let balance = crate::stats::YearBalance {
+        period: crate::stats::PeriodStats {
+            total_hours: 0.0,
+            expected_hours: 0.0,
+            balance_hours: 0.0,
+            working_days_expected: 0,
+            days_with_entries: 0,
+        },
+        carryover_hours: 0.0,
+        manual_adjustments_hours: 0.0,
+        total_balance: 999.0,
+    };
+    let holidays =
+        crate::stats::HolidayStats { days_taken: 0.0, days_remaining: 0.0, total_days: 0.0 };
+
+    let _ = app.update_team(TeamMsg::CarryoverSyncLoaded(3, 0, 2023, Ok((balance, holidays))));
+
+    let member = app.team_settings.member(3).unwrap();
+    assert!(
+        !member.carryover.contains_key(&2024),
+        "a response launched under a superseded gen must not write any carryover"
+    );
+}
+
+/// A lead correcting their own weekly hours invalidates every team member's
+/// stored carryover (computed against the lead's baseline) and must purge
+/// and re-sync the whole roster.
+#[test]
+fn save_profile_weekly_hours_change_resets_team_carryover() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.settings.team_lead_mode = true;
+    app.settings.total_weekly_hours = 40.0;
+    app.settings.first_work_day = Some(chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+
+    let mut m = team_member(3, "Carry");
+    m.first_work_day = Some(chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+    m.carryover.insert(2025, crate::state::settings::YearCarryover::default());
+    m.carryover.insert(2026, crate::state::settings::YearCarryover {
+        overtime_hours: 12.0,
+        ..Default::default()
+    });
+    app.team_settings.members.push(m);
+    let gen_before = *app.team.carryover_sync_gen.entry(3).or_default();
+
+    app.settings_form.weekly_hours_input = "42".into();
+    app.settings_form.percentage_input = "100".into();
+    app.settings_form.holidays_input = "25".into();
+    app.settings_form.first_work_day_input = "01.01.2025".into();
+
+    let _ = app.update_settings(crate::app::SettingsMsg::SaveProfile);
+
+    assert_eq!(app.settings.total_weekly_hours, 42.0);
+    let member = app.team_settings.member(3).unwrap();
+    assert!(
+        !member.carryover.contains_key(&2026),
+        "auto-computed carryover must be purged when the lead's weekly hours change"
+    );
+    assert!(
+        *app.team.carryover_sync_gen.get(&3).unwrap() > gen_before,
+        "the per-member sync epoch must be bumped so any in-flight stale response is discarded"
+    );
 }
 
 #[test]
@@ -2099,6 +2250,69 @@ fn adj_delete_removes_entry_by_id() {
     let _ = app.update_team(TeamMsg::AdjDelete(9, 1));
 
     assert!(app.team_settings.member(9).unwrap().overtime_adjustments.adjustments_for(year).is_empty());
+}
+
+/// If the team-settings save fails, `AdjSubmit` must roll back the in-memory
+/// push so the lead doesn't see an adjustment applied that wasn't persisted,
+/// and must leave the form open (not silently dismissed) so they can retry.
+#[test]
+fn adj_submit_rolls_back_on_save_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocked = dir.path().join("blocked");
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.settings.data_dir = blocked;
+    app.team_settings.members.push(team_member(9, "Adj"));
+    let year = chrono::Local::now().naive_local().date().year();
+    app.team.adjustment_forms.insert(9, crate::app::OvertimeAdjustmentForm {
+        date_input: format!("01.03.{year}"),
+        hours_input: "4".into(),
+        reason_input: "test".into(),
+        error: None,
+    });
+
+    let _ = app.update_team(TeamMsg::AdjSubmit(9));
+
+    assert!(
+        app.team_settings.member(9).unwrap().overtime_adjustments.adjustments_for(year).is_empty(),
+        "the pushed adjustment must be rolled back when the save fails"
+    );
+    assert!(
+        app.team.adjustment_forms.contains_key(&9),
+        "the form must stay open on a failed save instead of silently closing"
+    );
+    assert!(app.error_banner.is_some());
+}
+
+/// Same rollback guarantee for `AdjDelete`: a failed save must restore the
+/// removed adjustment rather than leave it silently gone from disk-truth.
+#[test]
+fn adj_delete_rolls_back_on_save_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut m = team_member(9, "Adj");
+    let year = chrono::Local::now().naive_local().date().year();
+    m.overtime_adjustments.adjustments_for_mut(year).push(
+        crate::state::overtime_adjustments::OvertimeAdjustment {
+            id: 1, date: format!("{year}-03-01"), hours: 2.0, reason: "Bonus".into(),
+        }
+    );
+    app.team_settings.members.push(m);
+    // Save the initial state successfully first, then block the data dir so
+    // only the delete's save fails.
+    let _ = app.team_settings.save(&app.settings.data_dir);
+    let blocked = dir.path().join("blocked");
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    app.settings.data_dir = blocked;
+
+    let _ = app.update_team(TeamMsg::AdjDelete(9, 1));
+
+    assert_eq!(
+        app.team_settings.member(9).unwrap().overtime_adjustments.adjustments_for(year).len(),
+        1,
+        "the removed adjustment must be restored when the save fails"
+    );
+    assert!(app.error_banner.is_some());
 }
 
 // ── Task 6: Page::Team / Message::Team routing, dispatch, startup sync ───────

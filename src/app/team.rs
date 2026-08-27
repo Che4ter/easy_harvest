@@ -28,6 +28,13 @@ pub struct TeamPageState {
     pub first_work_day_inputs: HashMap<i64, String>,
     pub work_percentage_inputs: HashMap<i64, String>,
     pub r#gen: u64,
+    /// Per-member carryover-sync epoch. Bumped whenever a member's carryover
+    /// chain is restarted from scratch (first work day edit/detect, manual
+    /// reset, or a lead-side weekly-hours change). A `CarryoverSyncLoaded`
+    /// from a chain launched under an older gen is discarded on arrival —
+    /// otherwise it can reinsert a value a newer chain already purged, and
+    /// `first_missing_carryover_year` would never revisit that year.
+    pub carryover_sync_gen: HashMap<i64, u64>,
 
     /// Company user directory for the "add member" roster picker.
     /// Populated from `UserDirectoryCache` (or a live fetch) on first use of
@@ -89,7 +96,9 @@ pub enum TeamMsg {
 
     CarryoverDelete(i64, i32),
     CarryoverSyncStart(i64),
-    CarryoverSyncLoaded(i64, i32, Result<(YearBalance, HolidayStats), String>),
+    /// Carries the `carryover_sync_gen` for this member the chain was
+    /// launched with — see `TeamPageState::carryover_sync_gen`.
+    CarryoverSyncLoaded(i64, u64, i32, Result<(YearBalance, HolidayStats), String>),
     CarryoverReset(i64),
 
     AdjShowForm(i64),
@@ -102,9 +111,16 @@ pub enum TeamMsg {
 }
 
 impl EasyHarvest {
-    fn save_team_or_warn(&mut self) {
-        if let Err(e) = self.team_settings.save(&self.settings.data_dir) {
-            self.error_banner = Some(format!("Failed to save team settings: {e}"));
+    /// Returns `true` on success, so mutating handlers that need to roll
+    /// back an in-memory change on failure (rather than leave displayed data
+    /// diverged from disk) can check it.
+    fn save_team_or_warn(&mut self) -> bool {
+        match self.team_settings.save(&self.settings.data_dir) {
+            Ok(()) => true,
+            Err(e) => {
+                self.error_banner = Some(format!("Failed to save team settings: {e}"));
+                false
+            }
         }
     }
 
@@ -117,6 +133,34 @@ impl EasyHarvest {
             return Task::none();
         }
         let ids: Vec<i64> = self.team_settings.members.iter().map(|m| m.harvest_user_id).collect();
+        Task::batch(
+            ids.into_iter().map(|id| self.update_team(TeamMsg::CarryoverSyncStart(id))).collect::<Vec<_>>()
+        )
+    }
+
+    /// Every member's stored carryover was computed via
+    /// `member.expected_hours_per_day(self.settings.total_weekly_hours)` —
+    /// the *lead's* weekly-hours baseline, not the member's own. When the
+    /// lead corrects their own weekly hours, every member's cached
+    /// auto-computed carryover silently becomes wrong and would otherwise
+    /// never be revisited (the gap-fill sync only ever fills in *missing*
+    /// years). Purge and re-sync the whole roster, mirroring
+    /// `SettingsMsg::CarryoverReset` for the personal path.
+    pub(super) fn reset_all_team_carryovers(&mut self) -> Task<Message> {
+        if !self.settings.team_lead_mode {
+            return Task::none();
+        }
+        let ids: Vec<i64> = self.team_settings.members.iter().map(|m| m.harvest_user_id).collect();
+        for &id in &ids {
+            if let Some(member) = self.team_settings.member_mut(id) {
+                member.carryover.retain(|_, v| v.is_user_defined);
+                if let Some(fwd) = member.first_work_day {
+                    member.carryover.entry(fwd.year()).or_default();
+                }
+            }
+            *self.team.carryover_sync_gen.entry(id).or_default() += 1;
+        }
+        self.save_team_or_warn();
         Task::batch(
             ids.into_iter().map(|id| self.update_team(TeamMsg::CarryoverSyncStart(id))).collect::<Vec<_>>()
         )
@@ -213,6 +257,7 @@ impl EasyHarvest {
                 self.team.adjustment_forms.remove(&id);
                 self.team.first_work_day_inputs.remove(&id);
                 self.team.work_percentage_inputs.remove(&id);
+                self.team.carryover_sync_gen.remove(&id);
                 self.team.r#gen += 1;
                 // Delegate to the real exit path: clearing the flag alone would
                 // leave the removed member's cached entries, vacation and stats
@@ -301,7 +346,17 @@ impl EasyHarvest {
                     }
                 };
                 let Some(member) = self.team_settings.member_mut(id) else { return Task::none(); };
+                let fwd_changed = member.first_work_day != parsed;
                 member.first_work_day = parsed;
+                if fwd_changed {
+                    // Mirrors the personal path's CarryoverReset-on-change: a
+                    // corrected first_work_day invalidates any auto-computed
+                    // carryover entries from the old date, which would otherwise
+                    // sit as stale entries that block first_missing_carryover_year
+                    // from ever resyncing those years.
+                    member.carryover.retain(|_, v| v.is_user_defined);
+                    *self.team.carryover_sync_gen.entry(id).or_default() += 1;
+                }
                 if let Some(fwd) = parsed {
                     member.carryover.entry(fwd.year()).or_default();
                 }
@@ -316,6 +371,10 @@ impl EasyHarvest {
                         let Some(member) = self.team_settings.member_mut(id) else {
                             return Task::none();
                         };
+                        if member.first_work_day != Some(date) {
+                            member.carryover.retain(|_, c| c.is_user_defined);
+                            *self.team.carryover_sync_gen.entry(id).or_default() += 1;
+                        }
                         member.first_work_day = Some(date);
                         member.carryover.entry(date.year()).or_default();
                         self.save_team_or_warn();
@@ -368,6 +427,7 @@ impl EasyHarvest {
                     }
                 }
                 self.save_team_or_warn();
+                *self.team.carryover_sync_gen.entry(id).or_default() += 1;
                 self.update_team(TeamMsg::CarryoverSyncStart(id))
             }
 
@@ -376,13 +436,18 @@ impl EasyHarvest {
                 let Some(member) = self.team_settings.member(id) else { return Task::none(); };
                 let Some(fwd) = member.first_work_day else { return Task::none(); };
                 let start = fwd.year();
+                let r#gen = *self.team.carryover_sync_gen.entry(id).or_default();
                 match crate::stats::first_missing_carryover_year(&member.carryover, start, current_year) {
-                    Some(first_missing) => self.load_team_carryover_sync_task(member, first_missing),
+                    Some(first_missing) => self.load_team_carryover_sync_task(member, first_missing, r#gen),
                     None => Task::none(),
                 }
             }
 
-            TeamMsg::CarryoverSyncLoaded(id, year, result) => {
+            TeamMsg::CarryoverSyncLoaded(id, r#gen, year, result) => {
+                if self.team.carryover_sync_gen.get(&id).copied().unwrap_or(0) != r#gen {
+                    // Superseded by a newer reset for this member — discard.
+                    return Task::none();
+                }
                 let next = year + 1;
                 let lead_weekly_hours = self.settings.total_weekly_hours;
                 if let Some(member) = self.team_settings.member_mut(id) {
@@ -405,7 +470,29 @@ impl EasyHarvest {
                     }
                 }
                 self.save_team_or_warn();
-                self.update_team(TeamMsg::CarryoverSyncStart(id))
+                let sync_task = self.update_team(TeamMsg::CarryoverSyncStart(id));
+                // If that was the last missing year, the member's displayed
+                // stats (computed earlier against incomplete carryover, since
+                // this chain runs sequentially over potentially many years)
+                // are now stale — refresh them. Without this, a card can show
+                // wrong overtime/vacation numbers until the next manual
+                // Refresh or Team page revisit.
+                let current_year = Local::now().naive_local().date().year();
+                let chain_finished = self.team_settings.member(id).is_some_and(|m| {
+                    m.first_work_day.is_some_and(|fwd| {
+                        crate::stats::first_missing_carryover_year(&m.carryover, fwd.year(), current_year)
+                            .is_none()
+                    })
+                });
+                if chain_finished {
+                    let stats_task = match self.team_settings.member(id) {
+                        Some(member) => self.load_team_member_stats_task(member),
+                        None => Task::none(),
+                    };
+                    Task::batch([sync_task, stats_task])
+                } else {
+                    sync_task
+                }
             }
 
             TeamMsg::AdjShowForm(id) => {
@@ -443,10 +530,11 @@ impl EasyHarvest {
                         return Task::none();
                     }
                 };
+                let adj_year = validated.date.year();
                 if let Some(member) = self.team_settings.member_mut(id) {
                     let adj_id = member.overtime_adjustments.next_id;
                     member.overtime_adjustments.next_id += 1;
-                    member.overtime_adjustments.adjustments_for_mut(validated.date.year()).push(
+                    member.overtime_adjustments.adjustments_for_mut(adj_year).push(
                         crate::state::overtime_adjustments::OvertimeAdjustment {
                             id: adj_id,
                             date: validated.date.format("%Y-%m-%d").to_string(),
@@ -454,18 +542,41 @@ impl EasyHarvest {
                             reason: validated.reason,
                         }
                     );
+                    if !self.save_team_or_warn() {
+                        // Roll back so displayed data matches disk, and leave the
+                        // form open so the lead can retry instead of it silently
+                        // closing on a failed save.
+                        if let Some(member) = self.team_settings.member_mut(id) {
+                            member.overtime_adjustments.adjustments_for_mut(adj_year).retain(|a| a.id != adj_id);
+                        }
+                        return Task::none();
+                    }
                 }
-                self.save_team_or_warn();
                 self.team.adjustment_forms.remove(&id);
                 Task::done(Message::Team(TeamMsg::Refresh))
             }
 
             TeamMsg::AdjDelete(id, adj_id) => {
                 let current_year = Local::now().naive_local().date().year();
+                let removed: Vec<_> = self.team_settings.member(id)
+                    .map(|m| {
+                        m.overtime_adjustments.adjustments_for(current_year)
+                            .iter()
+                            .filter(|a| a.id == adj_id)
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 if let Some(member) = self.team_settings.member_mut(id) {
                     member.overtime_adjustments.adjustments_for_mut(current_year).retain(|a| a.id != adj_id);
                 }
-                self.save_team_or_warn();
+                if !self.save_team_or_warn() {
+                    // Roll back so displayed data matches disk.
+                    if let Some(member) = self.team_settings.member_mut(id) {
+                        member.overtime_adjustments.adjustments_for_mut(current_year).extend(removed);
+                    }
+                    return Task::none();
+                }
                 Task::done(Message::Team(TeamMsg::Refresh))
             }
 

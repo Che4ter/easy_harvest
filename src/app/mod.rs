@@ -304,6 +304,13 @@ pub struct EasyHarvest {
     pub billable_gen: u64,
     pub stats_gen: u64,
     pub project_tracking_gen: u64,
+    /// Bumped whenever the personal carryover-sync chain is restarted from
+    /// scratch (`CarryoverReset`/`SaveProfile` with a changed first work
+    /// day). A stale `CarryoverSyncLoaded` from an earlier, superseded chain
+    /// carries the gen it was launched with and is discarded on mismatch —
+    /// otherwise it can silently reinsert a value the newer chain already
+    /// purged, and the chain never revisits that year again.
+    pub carryover_sync_gen: u64,
 
     // Sub-states
     pub settings_form: SettingsFormState,
@@ -476,6 +483,7 @@ impl EasyHarvest {
             billable_gen: 0,
             stats_gen: 0,
             project_tracking_gen: 0,
+            carryover_sync_gen: 0,
             settings_form: SettingsFormState {
                 weekly_hours_input: init_weekly,
                 percentage_input: init_pct,
@@ -598,6 +606,7 @@ impl EasyHarvest {
             billable_gen: 0,
             stats_gen: 0,
             project_tracking_gen: 0,
+            carryover_sync_gen: 0,
             settings_form: SettingsFormState::new(today.year()),
             template_form: TemplateFormState::default(),
             work_day_edit: WorkDayEditState::default(),

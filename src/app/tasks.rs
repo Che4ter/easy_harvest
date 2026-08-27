@@ -236,7 +236,7 @@ impl EasyHarvest {
 
     /// Background task: load stats for a specific past `year` to derive carryover into
     /// `year + 1`.  Does NOT affect `self.overtime_year` or any loading state.
-    pub(super) fn load_carryover_sync_task(&self, year: i32) -> Task<Message> {
+    pub(super) fn load_carryover_sync_task(&self, year: i32, r#gen: u64) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();
         };
@@ -275,7 +275,7 @@ impl EasyHarvest {
                 );
                 Ok((balance, holidays))
             },
-            move |result| Message::Settings(SettingsMsg::CarryoverSyncLoaded(year, result)),
+            move |result| Message::Settings(SettingsMsg::CarryoverSyncLoaded(r#gen, year, result)),
         )
     }
 
@@ -338,6 +338,7 @@ impl EasyHarvest {
         &self,
         member: &crate::state::team::TeamMember,
         year: i32,
+        r#gen: u64,
     ) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();
@@ -375,7 +376,7 @@ impl EasyHarvest {
                     total_holiday_days,
                 ))
             },
-            move |result| Message::Team(TeamMsg::CarryoverSyncLoaded(user_id, year, result)),
+            move |result| Message::Team(TeamMsg::CarryoverSyncLoaded(user_id, r#gen, year, result)),
         )
     }
 

@@ -168,8 +168,11 @@ pub enum SettingsMsg {
     /// Kick off background stats-fetch for every past year whose carryover[year+1] is
     /// still missing.  Triggered automatically on startup and by the Reset button.
     CarryoverSyncStart,
-    /// Background carryover fetch for one year completed.
-    CarryoverSyncLoaded(i32, Result<(crate::stats::YearBalance, crate::stats::HolidayStats), String>),
+    /// Background carryover fetch for one year completed. Carries the
+    /// `carryover_sync_gen` the chain was launched with so a response from a
+    /// chain superseded by a newer `CarryoverReset` can be discarded instead
+    /// of reinserting stale data.
+    CarryoverSyncLoaded(u64, i32, Result<(crate::stats::YearBalance, crate::stats::HolidayStats), String>),
     /// Clear all auto-computed carryover entries, re-seed, and re-run CarryoverSyncStart.
     CarryoverReset,
 
@@ -579,6 +582,8 @@ impl EasyHarvest {
                 }
                 self.save_settings_or_warn();
                 self.recompute_vacation_summary();
+                // Starting a fresh chain invalidates any chain already in flight.
+                self.carryover_sync_gen += 1;
                 // Re-run background sync for all past years.
                 self.update_settings(SettingsMsg::CarryoverSyncStart)
             }
@@ -595,13 +600,17 @@ impl EasyHarvest {
                 if let Some(first_missing) =
                     crate::stats::first_missing_carryover_year(&self.settings.carryover, start, current_year)
                 {
-                    self.load_carryover_sync_task(first_missing)
+                    self.load_carryover_sync_task(first_missing, self.carryover_sync_gen)
                 } else {
                     Task::none()
                 }
             }
 
-            SettingsMsg::CarryoverSyncLoaded(year, result) => {
+            SettingsMsg::CarryoverSyncLoaded(r#gen, year, result) => {
+                if r#gen != self.carryover_sync_gen {
+                    // Superseded by a newer CarryoverReset — discard.
+                    return Task::none();
+                }
                 let next = year + 1;
                 match result {
                     Ok((balance, holidays)) => {
@@ -651,6 +660,7 @@ impl EasyHarvest {
                     }
                 };
                 let fwd_changed = self.settings.first_work_day != profile.first_work_day;
+                let weekly_hours_changed = self.settings.total_weekly_hours != profile.weekly_hours;
                 self.settings.total_weekly_hours = profile.weekly_hours;
                 self.settings.work_percentage = profile.percentage;
                 self.settings.total_holiday_days_per_year = profile.holidays;
@@ -666,13 +676,24 @@ impl EasyHarvest {
                         self.settings_form.profile_error = Some(format!("Save failed: {e}"));
                     }
                 }
-                if fwd_changed {
+                let personal_reset = fwd_changed.then(|| {
                     // Re-seed and re-sync so any carryover entries computed before
                     // first_work_day was configured (or for a different start date)
                     // don't carry incorrect values forward.
-                    return self.update_settings(SettingsMsg::CarryoverReset);
+                    self.update_settings(SettingsMsg::CarryoverReset)
+                });
+                let team_reset = weekly_hours_changed.then(|| {
+                    // Every team member's stored carryover was computed using
+                    // this weekly-hours value as their baseline — see
+                    // `reset_all_team_carryovers`.
+                    self.reset_all_team_carryovers()
+                });
+                match (personal_reset, team_reset) {
+                    (Some(a), Some(b)) => Task::batch([a, b]),
+                    (Some(a), None) => a,
+                    (None, Some(b)) => b,
+                    (None, None) => Task::none(),
                 }
-                Task::none()
             }
 
             SettingsMsg::HolidayTaskToggle(task_id) => {
