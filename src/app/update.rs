@@ -259,7 +259,7 @@ impl EasyHarvest {
                 self.stats_gen += 1;
                 self.load_stats_task()
             }
-            Page::Settings => Task::none(),
+            Page::Settings => self.update_team(TeamMsg::DirectoryEnsureLoaded),
             Page::Vacation => {
                 if self.vacation.entries.is_empty() && self.client.is_some() {
                     self.loading = true;
@@ -337,7 +337,7 @@ impl EasyHarvest {
                     self.settings_form.profile_saved = false;
                     self.settings_form.data_dir_input = self.settings.data_dir.display().to_string();
                     self.settings_form.data_dir_saved = false;
-                    Task::none()
+                    self.update_team(TeamMsg::DirectoryEnsureLoaded)
                 } else if self.client.is_some() && self.harvest_user_id.is_none() {
                     // The current-user fetch hasn't resolved yet. Firing this
                     // page's load now would call list_all_time_entries without

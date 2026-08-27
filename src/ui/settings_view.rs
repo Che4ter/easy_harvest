@@ -727,8 +727,15 @@ fn admin_hint_section() -> Element<'static, Message> {
 
 fn team_lead_mode_section(state: &EasyHarvest) -> Element<'_, Message> {
     let enabled = state.settings.team_lead_mode;
-    let btn_label = if enabled { "Enabled" } else { "Disabled" };
 
+    // Status is shown as its own dot+label so it reads clearly at a glance,
+    // separate from the button, whose label is the action it performs
+    // ("Turn on"/"Turn off") rather than an ambiguous state word.
+    let status_color = if enabled { SUCCESS } else { TEXT_MUTED };
+    let status_label = if enabled { "● Enabled" } else { "○ Disabled" };
+    let status = text(status_label).font(FONT_MEDIUM).size(12).color(status_color);
+
+    let btn_label = if enabled { "Turn off" } else { "Turn on" };
     let toggle = button(text(btn_label).font(FONT_MEDIUM).size(12))
         .style(move |_, _: button::Status| {
             if enabled { toggle_active_style(6.0) } else { toggle_inactive_style(6.0) }
@@ -739,7 +746,7 @@ fn team_lead_mode_section(state: &EasyHarvest) -> Element<'_, Message> {
     container(
         row![
             column![
-                field_label("Team Lead Mode"),
+                row![field_label("Team Lead Mode"), status].spacing(8).align_y(Alignment::Center),
                 caption(
                     "Track your team's overtime and vacation, and add \
                      teammates below. Turn this on if you manage other \
@@ -843,7 +850,7 @@ fn roster_picker_el(state: &EasyHarvest) -> Element<'_, Message> {
         );
 
     let search_row = row![
-        text_input("Search team directory (name or email)…", &state.team.directory_query)
+        text_input("Search team directory (name, email, or user ID)…", &state.team.directory_query)
             .on_input(|v| Message::Team(TeamMsg::DirectoryQueryChanged(v)))
             .size(13)
             .padding([8, 10])
@@ -859,6 +866,9 @@ fn roster_picker_el(state: &EasyHarvest) -> Element<'_, Message> {
             .font(FONT_REGULAR).size(12).color(DANGER).into()
     } else if state.team.directory_loading && state.team.directory.is_empty() {
         text("Loading company directory…").font(FONT_REGULAR).size(12).color(TEXT_MUTED).into()
+    } else if state.team.directory.is_empty() {
+        text("Directory not loaded yet — press \"Refresh directory\".")
+            .font(FONT_REGULAR).size(12).color(TEXT_MUTED).into()
     } else {
         Space::new().into()
     };
@@ -873,6 +883,9 @@ fn roster_picker_el(state: &EasyHarvest) -> Element<'_, Message> {
             .iter()
             .filter(|u| u.is_active && !existing_ids.contains(&u.id))
             .filter(|u| {
+                if let Ok(id) = query.parse::<i64>() {
+                    return u.id == id;
+                }
                 let full_name = format!("{} {}", u.first_name, u.last_name).to_lowercase();
                 full_name.contains(&query) || u.email.to_lowercase().contains(&query)
             })
@@ -883,7 +896,7 @@ fn roster_picker_el(state: &EasyHarvest) -> Element<'_, Message> {
                     column![
                         text(format!("{} {}", u.first_name, u.last_name))
                             .font(FONT_MEDIUM).size(13).color(TEXT_PRIMARY),
-                        caption(u.email.clone()),
+                        caption(format!("{}  ·  #{}", u.email, u.id)),
                     ]
                     .spacing(1),
                 )
