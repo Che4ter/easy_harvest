@@ -37,7 +37,13 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         sections = sections.push(admin_hint_section());
     }
 
-    sections = sections.push(team_lead_mode_section(state));
+    // Team Lead Mode is an admin feature: only offer the toggle to accounts
+    // with Harvest Administrator access. Also show it to anyone who already
+    // has it turned on (even if their admin status was revoked or hasn't been
+    // re-resolved yet) so it's never a one-way switch they can't turn off.
+    if state.harvest_user_is_admin || state.settings.team_lead_mode {
+        sections = sections.push(team_lead_mode_section(state));
+    }
 
     if state.settings.team_lead_mode {
         sections = sections.push(team_management_section(state));
@@ -933,8 +939,10 @@ fn team_member_settings_card<'a>(
     let year = Local::now().naive_local().date().year();
 
     let header = row![
-        text(member.display_name.clone()).font(FONT_SEMIBOLD).size(14).color(TEXT_PRIMARY),
-        caption(format!("#{id}")),
+        text(format!("{}  ·  #{id}", member.display_name))
+            .font(FONT_SEMIBOLD)
+            .size(14)
+            .color(TEXT_PRIMARY),
         Space::new().width(Length::Fill),
         delete_chip_btn(Message::Team(TeamMsg::RemoveMember(id))),
     ]
@@ -952,7 +960,6 @@ fn team_member_settings_card<'a>(
             .padding([6, 10])
             .style(input_style)
             .width(Length::Fixed(120.0)),
-        outline_btn_sm("Save").on_press(Message::Team(TeamMsg::FirstWorkDaySave(id))),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -968,7 +975,8 @@ fn team_member_settings_card<'a>(
             .padding([6, 10])
             .style(input_style)
             .width(Length::Fixed(80.0)),
-        outline_btn_sm("Save").on_press(Message::Team(TeamMsg::WorkPercentageSave(id))),
+        Space::new().width(Length::Fill),
+        outline_btn_sm("Save").on_press(Message::Team(TeamMsg::MemberSave(id))),
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -1160,8 +1168,16 @@ fn connection_section(state: &EasyHarvest) -> Element<'_, Message> {
     let connected = !state.settings.account_id.is_empty();
 
     let status_row: Element<Message> = if connected {
+        let status_text = match state.harvest_user_id {
+            Some(user_id) => format!(
+                "Connected · Account {} · User {}",
+                state.settings.account_id, user_id
+            ),
+            None => format!("Connected · Account {}", state.settings.account_id),
+        };
+
         row![
-            text(format!("Connected · Account {}", state.settings.account_id))
+            text(status_text)
                 .font(FONT_REGULAR)
                 .size(12)
                 .color(SUCCESS),

@@ -77,6 +77,13 @@ pub enum TeamMsg {
     ImpersonationExit,
     FirstWorkDayInputChanged(i64, String),
     FirstWorkDaySave(i64),
+    /// Single "Save" button for a member card that covers both the first
+    /// work day and work % fields, since having one Save button per field
+    /// was confusing. Only dispatches the underlying save for a field the
+    /// user actually edited (has a pending entry in the input map) — see
+    /// `FirstWorkDaySave`/`WorkPercentageSave` for why an untouched field
+    /// must not be re-saved from a blank input.
+    MemberSave(i64),
     /// Auto-detect result for a newly added member's `first_work_day`,
     /// dispatched automatically right after `AddMember` — no manual button.
     FirstWorkDayDetected(i64, Result<Option<NaiveDate>, String>),
@@ -331,7 +338,16 @@ impl EasyHarvest {
             }
 
             TeamMsg::FirstWorkDaySave(id) => {
-                let raw = self.team.first_work_day_inputs.get(&id).cloned().unwrap_or_default();
+                // Falls back to the member's stored value (formatted the same way the
+                // field displays it) when nothing was typed, so clicking Save without
+                // editing the field doesn't wipe an already-set first work day.
+                let raw = self.team.first_work_day_inputs.get(&id).cloned().unwrap_or_else(|| {
+                    self.team_settings
+                        .member(id)
+                        .and_then(|m| m.first_work_day)
+                        .map(|d| d.format("%d.%m.%Y").to_string())
+                        .unwrap_or_default()
+                });
                 let raw = raw.trim().to_string();
                 let parsed = if raw.is_empty() {
                     None
@@ -365,6 +381,17 @@ impl EasyHarvest {
                 self.update_team(TeamMsg::CarryoverSyncStart(id))
             }
 
+            TeamMsg::MemberSave(id) => {
+                let mut tasks = Vec::new();
+                if self.team.work_percentage_inputs.contains_key(&id) {
+                    tasks.push(self.update_team(TeamMsg::WorkPercentageSave(id)));
+                }
+                if self.team.first_work_day_inputs.contains_key(&id) {
+                    tasks.push(self.update_team(TeamMsg::FirstWorkDaySave(id)));
+                }
+                Task::batch(tasks)
+            }
+
             TeamMsg::FirstWorkDayDetected(id, result) => {
                 match result {
                     Ok(Some(date)) => {
@@ -396,7 +423,15 @@ impl EasyHarvest {
             }
 
             TeamMsg::WorkPercentageSave(id) => {
-                let raw = self.team.work_percentage_inputs.get(&id).cloned().unwrap_or_default();
+                // Same fallback as FirstWorkDaySave: use the member's stored value
+                // when nothing was typed, so an untouched field can't be blanked
+                // into a parse error or an unintended overwrite.
+                let raw = self.team.work_percentage_inputs.get(&id).cloned().unwrap_or_else(|| {
+                    self.team_settings
+                        .member(id)
+                        .map(|m| format!("{:.0}", m.work_percentage * 100.0))
+                        .unwrap_or_default()
+                });
                 let percentage = match raw.trim().replace(',', ".").parse::<f64>() {
                     Ok(v) if v > 0.0 && v <= 100.0 => v / 100.0,
                     _ => {
