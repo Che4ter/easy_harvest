@@ -107,6 +107,15 @@ pub struct UsersResponse {
     pub total_pages: i64,
 }
 
+// --- Company ---
+
+/// Subset of `GET /v2/company` — only the web address is used.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Company {
+    /// e.g. "https://acme.harvestapp.com"
+    pub base_uri: String,
+}
+
 // --- Project user assignment (for listing projects assigned to current user) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

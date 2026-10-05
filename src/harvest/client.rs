@@ -124,6 +124,7 @@ impl HarvestClient {
         user_id: Option<i64>,
         from: Option<&str>,
         to: Option<&str>,
+        approval_status: Option<&str>,
         page: Option<i64>,
     ) -> Result<TimeEntriesResponse, HarvestError> {
         let resp = self
@@ -137,6 +138,9 @@ impl HarvestClient {
                 }
                 if let Some(to) = to {
                     req = req.query(&[("to", to)]);
+                }
+                if let Some(status) = approval_status {
+                    req = req.query(&[("approval_status", status)]);
                 }
                 if let Some(page) = page {
                     req = req.query(&[("page", &page.to_string())]);
@@ -159,7 +163,23 @@ impl HarvestClient {
         to: &str,
     ) -> Result<Vec<TimeEntry>, HarvestError> {
         paginate_all(|page| async move {
-            let resp = self.list_time_entries(user_id, Some(from), Some(to), Some(page)).await?;
+            let resp = self.list_time_entries(user_id, Some(from), Some(to), None, Some(page)).await?;
+            Ok((resp.time_entries, resp.total_pages))
+        })
+        .await
+    }
+
+    /// Fetch every unsubmitted time entry of `user_id` up to and including
+    /// `to`, across all history (no `from`). Normally a single page.
+    pub async fn list_unsubmitted_time_entries(
+        &self,
+        user_id: i64,
+        to: &str,
+    ) -> Result<Vec<TimeEntry>, HarvestError> {
+        paginate_all(|page| async move {
+            let resp = self
+                .list_time_entries(Some(user_id), None, Some(to), Some("unsubmitted"), Some(page))
+                .await?;
             Ok((resp.time_entries, resp.total_pages))
         })
         .await
@@ -217,6 +237,16 @@ impl HarvestClient {
             .send_with_retry(|| {
                 self.request(reqwest::Method::PATCH, &format!("/time_entries/{id}/stop"))
             })
+            .await?;
+        Ok(resp.json().await?)
+    }
+
+    // --- Company ---
+
+    /// `GET /v2/company`. Harvest documents this as admin-only.
+    pub async fn get_company(&self) -> Result<Company, HarvestError> {
+        let resp = self
+            .send_with_retry(|| self.request(reqwest::Method::GET, "/company"))
             .await?;
         Ok(resp.json().await?)
     }
