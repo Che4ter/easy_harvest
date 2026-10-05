@@ -50,6 +50,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
     }
 
     sections = sections.push(data_dir_section(state));
+    sections = sections.push(unsubmitted_section(state));
     sections = sections.push(startup_section(state));
     sections = sections.push(connection_section(state));
     let version_footer: Element<'_, Message> =
@@ -1115,6 +1116,34 @@ fn team_member_settings_card<'a>(
 }
 
 // ── Autostart section ─────────────────────────────────────────────────────────
+
+fn unsubmitted_section(state: &EasyHarvest) -> Element<'_, Message> {
+    container(
+        column![
+            section_heading("Harvest Web Address"),
+            row![
+                text_input("yourcompany.harvestapp.com", &state.settings_form.web_address_input)
+                    .on_input(|v| Message::Settings(SettingsMsg::WebAddressChanged(v)))
+                    .on_submit(Message::Settings(SettingsMsg::SaveWebAddress))
+                    .size(13)
+                    .padding([8, 10])
+                    .style(input_style),
+                Space::new().width(8).height(8),
+                primary_btn("Save").on_press(Message::Settings(SettingsMsg::SaveWebAddress)),
+            ]
+            .align_y(Alignment::Center),
+            caption(
+                "Used by the unsubmitted-weeks banner\u{2019}s \u{201c}Open in Harvest\u{201d} \
+                 button. Filled in automatically for Harvest administrators.",
+            ),
+        ]
+        .spacing(SECTION_GAP),
+    )
+    .style(card_style)
+    .padding(12)
+    .width(Length::Fill)
+    .into()
+}
 
 fn startup_section(state: &EasyHarvest) -> Element<'_, Message> {
     if !cfg!(any(target_os = "linux", target_os = "windows")) {

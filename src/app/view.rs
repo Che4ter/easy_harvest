@@ -31,6 +31,10 @@ impl EasyHarvest {
             col = col.push(error_banner(err));
         }
 
+        if self.show_unsubmitted_banner() {
+            col = col.push(unsubmitted_banner(self));
+        }
+
         if let Some(banner) = update_banner(&self.update_state) {
             col = col.push(banner);
         }
@@ -144,38 +148,66 @@ fn nav_bar(current: &Page, team_lead_mode: bool, impersonating: bool) -> Element
         .into()
 }
 
-fn impersonation_banner(name: &str) -> Element<'static, Message> {
-    let exit_btn = button(
-        text("Exit").font(FONT_MEDIUM).size(13).color(Color::WHITE),
-    )
-    .style(|_, _| button::Style {
-        background: Some(iced::Background::Color(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.20 })),
-        text_color: Color::WHITE,
-        border: iced::Border { radius: 4.0.into(), ..Default::default() },
-        ..Default::default()
-    })
-    .padding([4, 10])
-    .on_press(Message::Team(TeamMsg::ImpersonationExit));
+/// Full-width coloured bar: message on the left, buttons on the right.
+fn action_banner<'a>(
+    message: String,
+    background: Color,
+    actions: Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let mut content = row![
+        text(message).font(FONT_REGULAR).size(13).color(Color::WHITE),
+        Space::new().width(iced::Length::Fill),
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
+    for action in actions {
+        content = content.push(action);
+    }
+    container(content)
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(background)),
+            ..Default::default()
+        })
+        .padding([8, 16])
+        .width(iced::Length::Fill)
+        .into()
+}
 
-    container(
-        row![
-            text(format!("Viewing {name} — read-only"))
-                .font(FONT_REGULAR)
-                .size(13)
-                .color(Color::WHITE),
-            Space::new().width(iced::Length::Fill),
-            exit_btn,
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center),
+/// Translucent-dark button used inside coloured banners.
+fn banner_btn(label: &str, msg: Message) -> Element<'_, Message> {
+    button(text(label).font(FONT_MEDIUM).size(13).color(Color::WHITE))
+        .style(|_, _| button::Style {
+            background: Some(iced::Background::Color(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.20 })),
+            text_color: Color::WHITE,
+            border: iced::Border { radius: 4.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .padding([4, 10])
+        .on_press(msg)
+        .into()
+}
+
+fn impersonation_banner(name: &str) -> Element<'static, Message> {
+    action_banner(
+        format!("Viewing {name} — read-only"),
+        ACCENT,
+        vec![banner_btn("Exit", Message::Team(TeamMsg::ImpersonationExit))],
     )
-    .style(|_| container::Style {
-        background: Some(iced::Background::Color(ACCENT)),
-        ..Default::default()
-    })
-    .padding([8, 16])
-    .width(iced::Length::Fill)
-    .into()
+}
+
+fn unsubmitted_banner(state: &EasyHarvest) -> Element<'_, Message> {
+    let today = Local::now().naive_local().date();
+    let mut actions = Vec::new();
+    if state.settings.harvest_web_address.is_some() {
+        actions.push(banner_btn("Open in Harvest", Message::Unsubmitted(UnsubmittedMsg::OpenInHarvest)));
+    }
+    actions.push(banner_btn("Recheck", Message::Unsubmitted(UnsubmittedMsg::Check { force: true })));
+    actions.push(banner_btn("✕", Message::Unsubmitted(UnsubmittedMsg::Dismiss)));
+    action_banner(
+        crate::unsubmitted::banner_text(&state.unsubmitted_weeks, today),
+        WARNING,
+        actions,
+    )
 }
 
 fn error_banner(msg: &str) -> Element<'_, Message> {
