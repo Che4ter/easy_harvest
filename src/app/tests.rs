@@ -2776,3 +2776,13 @@ fn created_running_entry_stops_other_timers() {
     assert!(!app.entries[0].is_running, "Harvest runs one timer at a time");
     assert!(app.entries[1].is_running);
 }
+
+#[test]
+fn entry_hours_keeps_typed_time_when_starting_a_timer() {
+    use super::entries::entry_hours;
+    assert_eq!(entry_hours("", true), Ok(None), "blank: timer starts at zero");
+    assert_eq!(entry_hours("2:30", true), Ok(Some(2.5)), "typed: timer continues from it");
+    assert!(entry_hours("abc", true).is_err());
+    assert_eq!(entry_hours("1.5", false), Ok(Some(1.5)));
+    assert_eq!(entry_hours("", false), Err("Enter a valid number of hours"));
+}

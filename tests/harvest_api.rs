@@ -660,3 +660,29 @@ async fn test_month_summaries_match_ytd_total() {
         ytd.period.balance_hours
     );
 }
+
+/// Creating an entry without `hours` must start its timer — the new-entry
+/// form's "Start Timer" relies on it. Cleans up after itself.
+#[tokio::test]
+#[ignore]
+async fn test_create_without_hours_starts_timer() {
+    let client = client();
+    let (pa, ta) = active_project_and_task(&client).await;
+
+    let created = client
+        .create_time_entry(&CreateTimeEntry {
+            project_id: pa.project.id,
+            task_id: ta.task.id,
+            spent_date: safe_test_date(),
+            hours: None,
+            notes: Some("easy_harvest timer test — safe to delete".to_string()),
+        })
+        .await
+        .expect("create failed");
+
+    assert!(created.is_running, "entry created without hours should be running");
+    assert!(created.timer_started_at.is_some(), "timer_started_at should be set");
+
+    client.stop_timer(created.id).await.expect("stop_timer failed");
+    client.delete_time_entry(created.id).await.expect("delete failed");
+}

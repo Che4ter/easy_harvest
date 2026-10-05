@@ -65,6 +65,17 @@ impl Default for EntryForm {
     }
 }
 
+/// Hours to send for the form's input. A timer may start from blank
+/// (`None`, Harvest starts at zero) or from typed hours; a plain save needs hours.
+pub(super) fn entry_hours(input: &str, start_timer: bool) -> Result<Option<f64>, &'static str> {
+    match crate::ui::parse_hours(input) {
+        Some(h) => Ok(Some(h)),
+        None if start_timer && input.trim().is_empty() => Ok(None),
+        None if start_timer => Err("Enter a valid number of hours, or leave it empty"),
+        None => Err("Enter a valid number of hours"),
+    }
+}
+
 // ── Entries / Timer ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -427,26 +438,22 @@ impl EasyHarvest {
         let Some(form) = &self.entry_form else {
             return Task::none();
         };
-        let hours = if start_timer {
-            // Harvest only runs timers on today's sheet.
-            if form.editing_id.is_some()
-                || self.current_date != Local::now().naive_local().date()
-            {
+        // Timers only run on today's sheet.
+        if start_timer
+            && (form.editing_id.is_some() || self.current_date != Local::now().naive_local().date())
+        {
+            if let Some(f) = &mut self.entry_form {
+                f.error = Some("A timer can only be started today".into());
+            }
+            return Task::none();
+        }
+        let hours = match entry_hours(&form.hours_input, start_timer) {
+            Ok(h) => h,
+            Err(msg) => {
                 if let Some(f) = &mut self.entry_form {
-                    f.error = Some("A timer can only be started today".into());
+                    f.error = Some(msg.into());
                 }
                 return Task::none();
-            }
-            None
-        } else {
-            match crate::ui::parse_hours(&form.hours_input) {
-                Some(h) => Some(h),
-                None => {
-                    if let Some(f) = &mut self.entry_form {
-                        f.error = Some("Enter a valid number of hours".into());
-                    }
-                    return Task::none();
-                }
             }
         };
 
@@ -521,10 +528,14 @@ impl EasyHarvest {
             };
             Task::perform(
                 async move {
-                    client
-                        .create_time_entry(&create)
-                        .await
-                        .map_err(|e| e.to_string())
+                    let created = client.create_time_entry(&create).await.map_err(|e| e.to_string())?;
+                    // Typed hours: Harvest only starts a timer on a blank entry, so
+                    // continue from the typed time like its web timesheet does.
+                    if start_timer && !created.is_running {
+                        client.restart_timer(created.id).await.map_err(|e| e.to_string())
+                    } else {
+                        Ok(created)
+                    }
                 },
                 |result| Message::Entry(Box::new(EntryMsg::Created(result))),
             )

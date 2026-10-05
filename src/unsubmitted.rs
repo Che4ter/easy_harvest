@@ -71,9 +71,11 @@ fn week_number(monday: NaiveDate, today: NaiveDate) -> String {
     }
 }
 
-/// "6–12 Jul", or "29 Jun–5 Jul" when the range spans two months.
+/// "6–12 Jul", "29 Jun–5 Jul" across two months, or "31 Aug" for one day.
 fn date_range(from: NaiveDate, to: NaiveDate) -> String {
-    if from.month() == to.month() {
+    if from == to {
+        format!("{} {}", to.day(), to.format("%b"))
+    } else if from.month() == to.month() {
         format!("{}–{} {}", from.day(), to.day(), to.format("%b"))
     } else {
         format!("{} {}–{} {}", from.day(), from.format("%b"), to.day(), to.format("%b"))
@@ -325,5 +327,12 @@ mod tests {
     fn banner_text_shows_partial_week_range() {
         let weeks = [partial(d(2026, 9, 28), d(2026, 9, 30), 6.0)];
         assert_eq!(banner_text(&weeks, d(2026, 10, 1)), "Week 40 (28–30 Sep) has 6.0h unsubmitted");
+    }
+
+    #[test]
+    fn banner_text_single_due_day() {
+        // August 2026 ends on Monday: on Tuesday only Mon 31 Aug is due.
+        let weeks = unsubmitted_weeks(&[entry("2026-08-31", 4.0, U)], d(2026, 9, 1));
+        assert_eq!(banner_text(&weeks, d(2026, 9, 1)), "Week 36 (31 Aug) has 4.0h unsubmitted");
     }
 }
