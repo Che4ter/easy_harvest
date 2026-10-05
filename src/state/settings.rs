@@ -162,6 +162,12 @@ pub struct Settings {
     #[serde(default)]
     pub admin_hint_dismissed: bool,
 
+    /// Harvest web address, e.g. "https://acme.harvestapp.com" — used to
+    /// link the unsubmitted-weeks banner to the web timesheet. Entered by the
+    /// user, or filled once from `GET /v2/company` for admins.
+    #[serde(default)]
+    pub harvest_web_address: Option<String>,
+
     /// Whether the app is registered to launch at login.
     /// Synced with the OS autostart state on every load — not persisted to JSON.
     #[serde(skip)]
@@ -290,6 +296,7 @@ impl Default for Settings {
             first_work_day: None,
             team_lead_mode: false,
             admin_hint_dismissed: false,
+            harvest_web_address: None,
             autostart: false,
         }
     }
@@ -918,5 +925,14 @@ mod tests {
     #[test]
     fn admin_hint_dismissed_defaults_to_false() {
         assert!(!Settings::default().admin_hint_dismissed);
+    }
+
+    #[test]
+    fn old_settings_files_load_without_web_address() {
+        // A settings.json written before the field existed.
+        let json = r#"{"account_id":"1","default_break_minutes":60,"holiday_task_ids":[]}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.harvest_web_address, None);
+        assert_eq!(Settings::default().harvest_web_address, None);
     }
 }
