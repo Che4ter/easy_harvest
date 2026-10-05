@@ -2609,7 +2609,11 @@ use crate::unsubmitted::UnsubmittedWeek;
 use super::unsubmitted_warning::CHECK_INTERVAL;
 
 fn one_week() -> Vec<UnsubmittedWeek> {
-    vec![UnsubmittedWeek { monday: NaiveDate::from_ymd_opt(2026, 7, 6).unwrap(), hours: 8.0 }]
+    vec![UnsubmittedWeek {
+        monday: NaiveDate::from_ymd_opt(2026, 7, 6).unwrap(),
+        through: NaiveDate::from_ymd_opt(2026, 7, 12).unwrap(),
+        hours: 8.0,
+    }]
 }
 
 #[test]

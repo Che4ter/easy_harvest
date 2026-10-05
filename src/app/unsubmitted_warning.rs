@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use super::*;
-use crate::unsubmitted::{last_completed_sunday, unsubmitted_weeks, week_url, normalize_web_address, UnsubmittedWeek};
+use crate::unsubmitted::{submission_cutoff, unsubmitted_weeks, week_url, normalize_web_address, UnsubmittedWeek};
 
 /// Minimum gap between non-forced checks (window re-opened from the tray).
 pub(super) const CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
@@ -54,7 +54,7 @@ impl EasyHarvest {
                 };
                 self.unsubmitted_checked_at = Some(now);
                 let today = Local::now().naive_local().date();
-                let to = last_completed_sunday(today).format("%Y-%m-%d").to_string();
+                let to = submission_cutoff(today).format("%Y-%m-%d").to_string();
                 Task::perform(
                     async move {
                         client

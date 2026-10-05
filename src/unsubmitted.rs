@@ -16,6 +16,8 @@ const MAX_LISTED_WEEKS: usize = 5;
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnsubmittedWeek {
     pub monday: NaiveDate,
+    /// Last due day: the week's Sunday, or the month end that cuts it short.
+    pub through: NaiveDate,
     pub hours: f64,
 }
 
@@ -23,17 +25,20 @@ fn week_monday(date: NaiveDate) -> NaiveDate {
     date - Duration::days(i64::from(date.weekday().num_days_from_monday()))
 }
 
-/// Sunday ending the week before the one containing `today` — the upper bound
-/// for the check, so the still-open current week is excluded.
-pub fn last_completed_sunday(today: NaiveDate) -> NaiveDate {
-    week_monday(today) - Duration::days(1)
+/// Last day that must already be submitted: the Sunday before the current
+/// week, or the end of last month when that is later — a month ending
+/// mid-week is submitted up to its last day, before the week is over.
+pub fn submission_cutoff(today: NaiveDate) -> NaiveDate {
+    let last_sunday = week_monday(today) - Duration::days(1);
+    let last_month_end = today.with_day(1).expect("day 1 exists") - Duration::days(1);
+    last_sunday.max(last_month_end)
 }
 
-/// Group unsubmitted entries by ISO week, sum hours, drop the week containing
-/// `today`, oldest first. Filters on `approval_status` itself so it is correct
-/// even without the server-side filter.
+/// Group unsubmitted entries up to `submission_cutoff(today)` by ISO week,
+/// sum hours, oldest first. Filters on `approval_status` itself so it is
+/// correct even without the server-side filter.
 pub fn unsubmitted_weeks(entries: &[TimeEntry], today: NaiveDate) -> Vec<UnsubmittedWeek> {
-    let current = week_monday(today);
+    let cutoff = submission_cutoff(today);
     let mut by_week: BTreeMap<NaiveDate, f64> = BTreeMap::new();
     for e in entries {
         if e.approval_status.as_deref() != Some("unsubmitted") {
@@ -42,14 +47,17 @@ pub fn unsubmitted_weeks(entries: &[TimeEntry], today: NaiveDate) -> Vec<Unsubmi
         let Ok(date) = NaiveDate::parse_from_str(&e.spent_date, "%Y-%m-%d") else {
             continue;
         };
-        let monday = week_monday(date);
-        if monday < current {
-            *by_week.entry(monday).or_insert(0.0) += e.hours;
+        if date <= cutoff {
+            *by_week.entry(week_monday(date)).or_insert(0.0) += e.hours;
         }
     }
     by_week
         .into_iter()
-        .map(|(monday, hours)| UnsubmittedWeek { monday, hours })
+        .map(|(monday, hours)| UnsubmittedWeek {
+            monday,
+            through: (monday + Duration::days(6)).min(cutoff),
+            hours,
+        })
         .collect()
 }
 
@@ -63,13 +71,12 @@ fn week_number(monday: NaiveDate, today: NaiveDate) -> String {
     }
 }
 
-/// "6–12 Jul", or "29 Jun–5 Jul" when the week spans two months.
-fn date_range(monday: NaiveDate) -> String {
-    let sunday = monday + Duration::days(6);
-    if monday.month() == sunday.month() {
-        format!("{}–{} {}", monday.day(), sunday.day(), sunday.format("%b"))
+/// "6–12 Jul", or "29 Jun–5 Jul" when the range spans two months.
+fn date_range(from: NaiveDate, to: NaiveDate) -> String {
+    if from.month() == to.month() {
+        format!("{}–{} {}", from.day(), to.day(), to.format("%b"))
     } else {
-        format!("{} {}–{} {}", monday.day(), monday.format("%b"), sunday.day(), sunday.format("%b"))
+        format!("{} {}–{} {}", from.day(), from.format("%b"), to.day(), to.format("%b"))
     }
 }
 
@@ -79,7 +86,7 @@ pub fn banner_text(weeks: &[UnsubmittedWeek], today: NaiveDate) -> String {
         [w] => format!(
             "Week {} ({}) has {:.1}h unsubmitted",
             week_number(w.monday, today),
-            date_range(w.monday),
+            date_range(w.monday, w.through),
             w.hours,
         ),
         _ => {
@@ -147,19 +154,24 @@ mod tests {
     }
 
     fn week(monday: NaiveDate, hours: f64) -> UnsubmittedWeek {
-        UnsubmittedWeek { monday, hours }
+        UnsubmittedWeek { monday, through: monday + Duration::days(6), hours }
+    }
+
+    /// Week cut short by a month end: only days up to `through` are due.
+    fn partial(monday: NaiveDate, through: NaiveDate, hours: f64) -> UnsubmittedWeek {
+        UnsubmittedWeek { monday, through, hours }
     }
 
     const U: Option<&str> = Some("unsubmitted");
 
     #[test]
-    fn last_completed_sunday_is_before_current_week() {
+    fn cutoff_excludes_the_open_current_week() {
         // Wed 2026-10-07 → Sun 2026-10-04
-        assert_eq!(last_completed_sunday(d(2026, 10, 7)), d(2026, 10, 4));
+        assert_eq!(submission_cutoff(d(2026, 10, 7)), d(2026, 10, 4));
         // Monday itself → the day before
-        assert_eq!(last_completed_sunday(d(2026, 10, 5)), d(2026, 10, 4));
+        assert_eq!(submission_cutoff(d(2026, 10, 5)), d(2026, 10, 4));
         // Sunday → the Sunday a week earlier (today's week is still open)
-        assert_eq!(last_completed_sunday(d(2026, 10, 11)), d(2026, 10, 4));
+        assert_eq!(submission_cutoff(d(2026, 10, 11)), d(2026, 10, 4));
     }
 
     #[test]
@@ -268,5 +280,50 @@ mod tests {
         assert_eq!(normalize_web_address("https://acme.harvestapp.com"), want);
         assert_eq!(normalize_web_address("   "), None);
         assert_eq!(normalize_web_address(""), None);
+    }
+
+    #[test]
+    fn cutoff_is_last_sunday_in_an_ordinary_week() {
+        // Mon 2026-10-05: September ended Wed 30th, already before last Sunday.
+        assert_eq!(submission_cutoff(d(2026, 10, 5)), d(2026, 10, 4));
+    }
+
+    #[test]
+    fn cutoff_moves_to_month_end_mid_week() {
+        // September 2026 ends on Wednesday; from Thursday on Mon–Wed are due.
+        assert_eq!(submission_cutoff(d(2026, 10, 1)), d(2026, 9, 30));
+        assert_eq!(submission_cutoff(d(2026, 10, 4)), d(2026, 9, 30));
+    }
+
+    #[test]
+    fn cutoff_month_ending_on_saturday_or_sunday() {
+        // October 2026 ends on Saturday: on Sunday Mon–Sat are due.
+        assert_eq!(submission_cutoff(d(2026, 11, 1)), d(2026, 10, 31));
+        // May 2026 ends on Sunday: same as the ordinary weekly rule.
+        assert_eq!(submission_cutoff(d(2026, 6, 3)), d(2026, 5, 31));
+    }
+
+    #[test]
+    fn cutoff_first_of_month_on_monday_and_new_year() {
+        // Mon 2026-06-01: both rules give Sunday 31 May.
+        assert_eq!(submission_cutoff(d(2026, 6, 1)), d(2026, 5, 31));
+        // Thu 2026-01-01: December 2025 ended Wednesday.
+        assert_eq!(submission_cutoff(d(2026, 1, 1)), d(2025, 12, 31));
+    }
+
+    #[test]
+    fn month_end_makes_part_of_current_week_due() {
+        // Thu 2026-10-01: Tue 29 Sep is due, Thu 1 Oct is not.
+        let entries = [entry("2026-09-29", 6.0, U), entry("2026-10-01", 2.0, U)];
+        assert_eq!(
+            unsubmitted_weeks(&entries, d(2026, 10, 1)),
+            vec![partial(d(2026, 9, 28), d(2026, 9, 30), 6.0)],
+        );
+    }
+
+    #[test]
+    fn banner_text_shows_partial_week_range() {
+        let weeks = [partial(d(2026, 9, 28), d(2026, 9, 30), 6.0)];
+        assert_eq!(banner_text(&weeks, d(2026, 10, 1)), "Week 40 (28–30 Sep) has 6.0h unsubmitted");
     }
 }
