@@ -900,17 +900,16 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
         .on_press(Message::Entry(Box::new(EntryMsg::CancelForm)));
 
     // New entries on today's sheet can start a timer instead of fixed hours.
-    let timer_btn: Element<'_, Message> =
-        if form.editing_id.is_none() && state.current_date == Local::now().naive_local().date() {
-            let btn = ghost_btn_lg("▶ Start Timer");
-            if form.submitting {
-                btn.into()
-            } else {
-                btn.on_press(Message::Entry(Box::new(EntryMsg::StartTimer))).into()
-            }
+    let timer_btn: Element<'_, Message> = if state.can_start_timer() {
+        let btn = ghost_btn_lg("▶  Start Timer");
+        if form.submitting {
+            btn.into()
         } else {
-            Space::new().into()
-        };
+            btn.on_press(Message::Entry(Box::new(EntryMsg::StartTimer))).into()
+        }
+    } else {
+        Space::new().into()
+    };
 
     scrollable(
         container(

@@ -231,7 +231,11 @@ impl EasyHarvest {
                         if entry.is_running {
                             for e in &mut self.entries { e.is_running = false; }
                         }
-                        self.entries.push(entry);
+                        // M4-F5: the user may have navigated to another day
+                        // while the request was in flight.
+                        if entry.spent_date == self.current_date.format("%Y-%m-%d").to_string() {
+                            self.entries.push(entry);
+                        }
                         self.entry_form = None;
                     }
                     Err(e) => {
@@ -431,6 +435,12 @@ impl EasyHarvest {
         }
     }
 
+    /// New entries on today's sheet can start a timer instead of fixed hours.
+    pub(crate) fn can_start_timer(&self) -> bool {
+        self.entry_form.as_ref().is_some_and(|f| f.editing_id.is_none())
+            && self.current_date == Local::now().naive_local().date()
+    }
+
     /// Create or update the entry in the form. With `start_timer` the new
     /// entry is created without hours, so Harvest starts its timer.
     fn submit_entry(&mut self, start_timer: bool) -> Task<Message> {
@@ -438,10 +448,10 @@ impl EasyHarvest {
         let Some(form) = &self.entry_form else {
             return Task::none();
         };
-        // Timers only run on today's sheet.
-        if start_timer
-            && (form.editing_id.is_some() || self.current_date != Local::now().naive_local().date())
-        {
+        // The view disables the buttons while a request is in flight; this
+        // also covers Enter in the notes field.
+        if form.submitting { return Task::none(); }
+        if start_timer && !self.can_start_timer() {
             if let Some(f) = &mut self.entry_form {
                 f.error = Some("A timer can only be started today".into());
             }

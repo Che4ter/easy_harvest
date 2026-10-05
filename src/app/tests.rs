@@ -2770,6 +2770,7 @@ fn created_running_entry_stops_other_timers() {
     app.entries = vec![old];
     let mut new = make_entry(2, 10, 1, 0.0, false);
     new.is_running = true;
+    new.spent_date = app.current_date.format("%Y-%m-%d").to_string();
 
     let _ = app.update_entries(EntryMsg::Created(Ok(new)));
 
@@ -2785,4 +2786,27 @@ fn entry_hours_keeps_typed_time_when_starting_a_timer() {
     assert!(entry_hours("abc", true).is_err());
     assert_eq!(entry_hours("1.5", false), Ok(Some(1.5)));
     assert_eq!(entry_hours("", false), Err("Enter a valid number of hours"));
+}
+
+#[test]
+fn submit_ignored_while_request_in_flight() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = timer_test_app(dir.path());
+    app.entry_form.as_mut().unwrap().submitting = true;
+    let _ = app.update_entries(EntryMsg::Submit);
+    assert_eq!(app.entry_form.as_ref().unwrap().error, None, "second press must not re-validate or re-send");
+}
+
+#[test]
+fn created_entry_for_another_day_is_not_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.entry_form = Some(EntryForm::new());
+    let mut other_day = make_entry(2, 10, 1, 1.0, false);
+    other_day.spent_date = "2025-01-14".into(); // test_instance shows 2025-01-15
+
+    let _ = app.update_entries(EntryMsg::Created(Ok(other_day)));
+
+    assert!(app.entries.is_empty(), "user navigated away while the create was in flight");
+    assert!(app.entry_form.is_none());
 }

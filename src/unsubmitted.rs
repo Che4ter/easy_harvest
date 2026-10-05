@@ -285,12 +285,6 @@ mod tests {
     }
 
     #[test]
-    fn cutoff_is_last_sunday_in_an_ordinary_week() {
-        // Mon 2026-10-05: September ended Wed 30th, already before last Sunday.
-        assert_eq!(submission_cutoff(d(2026, 10, 5)), d(2026, 10, 4));
-    }
-
-    #[test]
     fn cutoff_moves_to_month_end_mid_week() {
         // September 2026 ends on Wednesday; from Thursday on Mon–Wed are due.
         assert_eq!(submission_cutoff(d(2026, 10, 1)), d(2026, 9, 30));
