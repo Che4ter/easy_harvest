@@ -57,6 +57,9 @@ impl EasyHarvest {
             // ── Team ──
             Message::Team(msg) => self.update_team(msg),
 
+            // ── Unsubmitted-weeks warning ──
+            Message::Unsubmitted(msg) => self.update_unsubmitted(msg),
+
             // ── Stats ──
             Message::Stats(msg) => self.update_stats(msg),
 
@@ -76,6 +79,8 @@ impl EasyHarvest {
                             // Background: compute any missing carryover entries.
                             self.update_settings(SettingsMsg::CarryoverSyncStart),
                             self.start_all_team_carryover_syncs(),
+                            self.update_unsubmitted(UnsubmittedMsg::Check { force: true }),
+                            self.load_company_task(),
                         ])
                     }
                     Err(e) => {
@@ -129,7 +134,10 @@ impl EasyHarvest {
                     let (new_id, open_task) = window::open(window_settings());
                     self.window_id = Some(new_id);
                     self.window_visible = true;
-                    open_task.map(|id| Message::WindowIdReceived(Some(id)))
+                    Task::batch([
+                        open_task.map(|id| Message::WindowIdReceived(Some(id))),
+                        self.update_unsubmitted(UnsubmittedMsg::Check { force: false }),
+                    ])
                 }
             }
 

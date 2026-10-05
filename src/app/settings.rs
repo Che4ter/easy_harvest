@@ -31,6 +31,8 @@ pub struct SettingsFormState {
     pub holiday_task_query: String,
     pub data_dir_input: String,
     pub data_dir_saved: bool,
+    /// Text field for `Settings::harvest_web_address`.
+    pub web_address_input: String,
     /// Cached deduped task list for holiday_tasks_section: (task_id, task_name, context).
     pub cached_task_list: Vec<(i64, String, String)>,
     /// True once the user has manually edited the weekly hours field in the wizard,
@@ -187,6 +189,10 @@ pub enum SettingsMsg {
     /// User dismissed the "you have Harvest Administrator access" hint
     /// without enabling Team Lead Mode. Persisted so it isn't shown again.
     DismissAdminHint,
+
+    WebAddressChanged(String),
+    /// Normalise and persist the Harvest web address field.
+    SaveWebAddress,
 }
 
 impl EasyHarvest {
@@ -206,6 +212,7 @@ impl EasyHarvest {
                 }
                 let _ = std::fs::remove_file(Settings::token_file_path(&self.settings.data_dir));
                 self.settings.account_id = String::new();
+                self.reset_unsubmitted();
                 self.save_settings_or_warn();
                 self.client = None;
                 self.harvest_user_id = None;
@@ -928,6 +935,19 @@ impl EasyHarvest {
 
             SettingsMsg::DismissAdminHint => {
                 self.settings.admin_hint_dismissed = true;
+                self.save_settings_or_warn();
+                Task::none()
+            }
+
+            SettingsMsg::WebAddressChanged(v) => {
+                self.settings_form.web_address_input = v;
+                Task::none()
+            }
+
+            SettingsMsg::SaveWebAddress => {
+                let addr = crate::unsubmitted::normalize_web_address(&self.settings_form.web_address_input);
+                self.settings_form.web_address_input = addr.clone().unwrap_or_default();
+                self.settings.harvest_web_address = addr;
                 self.save_settings_or_warn();
                 Task::none()
             }

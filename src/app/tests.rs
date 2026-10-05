@@ -2602,3 +2602,109 @@ fn vacation_year_next_still_works_while_impersonating() {
 
     assert_eq!(app.vacation.year, before + 1);
 }
+
+// ── Unsubmitted-weeks warning ──────────────────────────────────────────────
+
+use crate::unsubmitted::UnsubmittedWeek;
+use super::unsubmitted_warning::CHECK_INTERVAL;
+
+fn one_week() -> Vec<UnsubmittedWeek> {
+    vec![UnsubmittedWeek { monday: NaiveDate::from_ymd_opt(2026, 7, 6).unwrap(), hours: 8.0 }]
+}
+
+#[test]
+fn loaded_weeks_show_banner() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = EasyHarvest::test_instance(dir.path());
+    assert!(!app.show_unsubmitted_banner());
+
+    let _ = app.update_unsubmitted(UnsubmittedMsg::Loaded(Ok(one_week())));
+
+    assert_eq!(app.unsubmitted_weeks, one_week());
+    assert!(app.show_unsubmitted_banner());
+}
+
+#[test]
+fn dismiss_survives_later_results() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let _ = app.update_unsubmitted(UnsubmittedMsg::Loaded(Ok(one_week())));
+
+    let _ = app.update_unsubmitted(UnsubmittedMsg::Dismiss);
+    assert!(!app.show_unsubmitted_banner());
+
+    let _ = app.update_unsubmitted(UnsubmittedMsg::Loaded(Ok(one_week())));
+    assert!(!app.show_unsubmitted_banner(), "dismiss lasts until restart");
+}
+
+#[test]
+fn failed_check_keeps_previous_result_and_error_banner() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let _ = app.update_unsubmitted(UnsubmittedMsg::Loaded(Ok(one_week())));
+
+    let _ = app.update_unsubmitted(UnsubmittedMsg::Loaded(Err("boom".into())));
+
+    assert_eq!(app.unsubmitted_weeks, one_week());
+    assert_eq!(app.error_banner, None);
+}
+
+#[test]
+fn check_throttle() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let now = std::time::Instant::now();
+
+    assert!(app.should_check_unsubmitted(false, now), "never checked → check");
+    app.unsubmitted_checked_at = Some(now);
+    assert!(!app.should_check_unsubmitted(false, now), "just checked → skip");
+    assert!(app.should_check_unsubmitted(true, now), "force bypasses throttle");
+    assert!(app.should_check_unsubmitted(false, now + CHECK_INTERVAL));
+}
+
+#[test]
+fn company_address_fills_empty_setting_only() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = EasyHarvest::test_instance(dir.path());
+
+    let _ = app.update_unsubmitted(UnsubmittedMsg::CompanyLoaded(Ok("https://acme.harvestapp.com/".into())));
+    assert_eq!(app.settings.harvest_web_address.as_deref(), Some("https://acme.harvestapp.com"));
+    assert_eq!(app.settings_form.web_address_input, "https://acme.harvestapp.com");
+
+    let _ = app.update_unsubmitted(UnsubmittedMsg::CompanyLoaded(Ok("https://other.harvestapp.com".into())));
+    assert_eq!(app.settings.harvest_web_address.as_deref(), Some("https://acme.harvestapp.com"));
+}
+
+#[test]
+fn save_web_address_normalizes_and_clears() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = EasyHarvest::test_instance(dir.path());
+
+    let _ = app.update_settings(SettingsMsg::WebAddressChanged(" acme.harvestapp.com/ ".into()));
+    let _ = app.update_settings(SettingsMsg::SaveWebAddress);
+    assert_eq!(app.settings.harvest_web_address.as_deref(), Some("https://acme.harvestapp.com"));
+    assert_eq!(app.settings_form.web_address_input, "https://acme.harvestapp.com");
+
+    let _ = app.update_settings(SettingsMsg::WebAddressChanged(String::new()));
+    let _ = app.update_settings(SettingsMsg::SaveWebAddress);
+    assert_eq!(app.settings.harvest_web_address, None);
+}
+
+#[test]
+fn reset_unsubmitted_forgets_previous_account() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.unsubmitted_weeks = one_week();
+    app.unsubmitted_checked_at = Some(std::time::Instant::now());
+    app.unsubmitted_dismissed = true;
+    app.settings.harvest_web_address = Some("https://acme.harvestapp.com".into());
+    app.settings_form.web_address_input = "https://acme.harvestapp.com".into();
+
+    app.reset_unsubmitted();
+
+    assert!(app.unsubmitted_weeks.is_empty());
+    assert!(app.unsubmitted_checked_at.is_none());
+    assert!(!app.unsubmitted_dismissed);
+    assert_eq!(app.settings.harvest_web_address, None);
+    assert!(app.settings_form.web_address_input.is_empty());
+}

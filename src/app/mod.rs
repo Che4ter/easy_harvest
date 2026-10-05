@@ -32,12 +32,14 @@ mod subscription;
 mod team;
 mod view;
 mod project_tracking;
+mod unsubmitted_warning;
 
 pub use billable::BillableMsg;
 pub use billable::{BillablePageState, BillableSummary};
 pub use stats::StatsMsg;
 pub use stats::OvertimeAdjustmentForm;
 pub use vacation::VacationMsg;
+pub use unsubmitted_warning::UnsubmittedMsg;
 pub use vacation::{VacationForm, VacationPageState, VacationSummary};
 pub use work_day::WorkDayMsg;
 pub use work_day::WorkDayEditState;
@@ -235,6 +237,9 @@ pub enum Message {
     // Team
     Team(TeamMsg),
 
+    // Unsubmitted-weeks warning
+    Unsubmitted(UnsubmittedMsg),
+
     // Window lifecycle
     WindowIdReceived(Option<window::Id>),
     WindowCloseRequested(window::Id),
@@ -327,6 +332,13 @@ pub struct EasyHarvest {
     pub tray_available: bool,
     pub window_visible: bool,
     pub update_state: UpdateState,
+
+    /// Past weeks with unsubmitted time, oldest first (last successful check).
+    pub unsubmitted_weeks: Vec<crate::unsubmitted::UnsubmittedWeek>,
+    /// When the last check was started — throttles window-reopen checks.
+    pub unsubmitted_checked_at: Option<std::time::Instant>,
+    /// ✕ pressed this session; deliberately not persisted.
+    pub unsubmitted_dismissed: bool,
 
     /// 0 = data-folder step, 1 = credentials step (first-run wizard only).
     pub wizard_step: u8,
@@ -454,6 +466,7 @@ impl EasyHarvest {
         let init_first_work_day = settings.first_work_day
             .map(|d| d.format("%d.%m.%Y").to_string())
             .unwrap_or_default();
+        let init_web_address = settings.harvest_web_address.clone().unwrap_or_default();
 
         #[cfg(not(target_os = "macos"))]
         let initial_tray_phase = work_day_store.get_or_default(today).phase();
@@ -491,6 +504,7 @@ impl EasyHarvest {
                 first_work_day_input: init_first_work_day,
                 holiday_view_year: today.year(),
                 data_dir_input: init_data_dir,
+                web_address_input: init_web_address,
                 ..SettingsFormState::new(today.year())
             },
             template_form: TemplateFormState::default(),
@@ -503,6 +517,9 @@ impl EasyHarvest {
             team: TeamPageState::new(),
             window_id: None,
             update_state: UpdateState::Idle,
+            unsubmitted_weeks: Vec::new(),
+            unsubmitted_checked_at: None,
+            unsubmitted_dismissed: false,
             // Optimistically assume the tray works on Linux/Windows; set to false
             // only if the tray subscription reports a spawn failure.
             tray_available: cfg!(not(target_os = "macos")),
@@ -620,6 +637,9 @@ impl EasyHarvest {
             tray_available: false,
             window_visible: false,
             update_state: UpdateState::Idle,
+            unsubmitted_weeks: Vec::new(),
+            unsubmitted_checked_at: None,
+            unsubmitted_dismissed: false,
             wizard_step: 1,
             overtime_year: today.year(),
             overtime_adjustments,
