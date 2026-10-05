@@ -96,9 +96,10 @@ jobs:
       # ── macOS: use cargo-bundle to produce a proper .app ────────────────────
       # cargo-bundle calls cargo build internally, which runs build.rs and
       # generates the correctly-sized icons in target/icons/ before bundling.
+      # Pinned: 0.12 renamed the bundle metadata keys (osx_minimum_system_version).
       - name: Install cargo-bundle (macOS)
         if: runner.os == 'macOS'
-        run: cargo install cargo-bundle --locked
+        run: cargo install cargo-bundle --version 0.11.0 --locked
 
       - name: Build & bundle (macOS)
         if: runner.os == 'macOS'
