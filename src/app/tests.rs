@@ -2712,3 +2712,67 @@ fn reset_unsubmitted_forgets_previous_account() {
     assert_eq!(app.settings.harvest_web_address, None);
     assert!(app.settings_form.web_address_input.is_empty());
 }
+
+fn timer_test_app(dir: &std::path::Path) -> EasyHarvest {
+    let mut app = EasyHarvest::test_instance(dir);
+    app.current_date = chrono::Local::now().naive_local().date();
+    app.cached_project_options = vec![crate::state::favorites::ProjectOption {
+        project_id: 10,
+        task_id: 1,
+        client_name: "C".into(),
+        project_name: "P".into(),
+        task_name: "T".into(),
+        is_pinned: false,
+        use_count: 0,
+        search_text: "C > P — T".into(),
+        search_text_lower: "c > p — t".into(),
+    }];
+    let mut form = EntryForm::new();
+    form.selected_project_key = Some((10, 1));
+    app.entry_form = Some(form);
+    app
+}
+
+#[test]
+fn start_timer_needs_no_hours() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = timer_test_app(dir.path());
+    let _ = app.update_entries(EntryMsg::Submit);
+    assert_eq!(
+        app.entry_form.as_ref().unwrap().error.as_deref(),
+        Some("Enter a valid number of hours"),
+        "control: a plain save still requires hours",
+    );
+
+    let mut app = timer_test_app(dir.path());
+    let _ = app.update_entries(EntryMsg::StartTimer);
+    assert_eq!(app.entry_form.as_ref().unwrap().error, None);
+}
+
+#[test]
+fn start_timer_refused_on_other_days() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = timer_test_app(dir.path());
+    app.current_date -= chrono::Duration::days(1);
+    let _ = app.update_entries(EntryMsg::StartTimer);
+    assert_eq!(
+        app.entry_form.as_ref().unwrap().error.as_deref(),
+        Some("A timer can only be started today"),
+    );
+}
+
+#[test]
+fn created_running_entry_stops_other_timers() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut old = make_entry(1, 10, 1, 2.0, false);
+    old.is_running = true;
+    app.entries = vec![old];
+    let mut new = make_entry(2, 10, 1, 0.0, false);
+    new.is_running = true;
+
+    let _ = app.update_entries(EntryMsg::Created(Ok(new)));
+
+    assert!(!app.entries[0].is_running, "Harvest runs one timer at a time");
+    assert!(app.entries[1].is_running);
+}

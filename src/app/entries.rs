@@ -82,6 +82,8 @@ pub enum EntryMsg {
     FocusHours,
     FocusNotes,
     Submit,
+    /// Create the new entry with a running timer instead of fixed hours.
+    StartTimer,
     Created(Result<TimeEntry, String>),
     Updated(Result<TimeEntry, String>),
     DeleteRequest(i64),
@@ -203,101 +205,9 @@ impl EasyHarvest {
                 iced::widget::operation::focus(iced::widget::Id::new("form_notes"))
             }
 
-            EntryMsg::Submit => {
-                if self.impersonating.is_some() { return Task::none(); }
-                let Some(form) = &self.entry_form else {
-                    return Task::none();
-                };
-                let hours: f64 = match crate::ui::parse_hours(&form.hours_input) {
-                    Some(h) => h,
-                    None => {
-                        if let Some(f) = &mut self.entry_form {
-                            f.error = Some("Enter a valid number of hours".into());
-                        }
-                        return Task::none();
-                    }
-                };
+            EntryMsg::Submit => self.submit_entry(false),
 
-                let options = self.cached_project_options.clone();
-                // M4-F2: prefer the stable (project_id, task_id) key — it survives
-                // an assignments refresh that would invalidate the stored index.
-                let opt = match form.selected_project_key {
-                    Some((project_id, task_id)) => options
-                        .iter()
-                        .find(|o| o.project_id == project_id && o.task_id == task_id)
-                        .cloned(),
-                    None => form.selected_project_idx
-                        .and_then(|idx| options.get(idx).cloned())
-                        .or_else(|| {
-                            options.iter().find(|o| {
-                                o.search_text.to_lowercase()
-                                    == form.project_query.to_lowercase()
-                            }).cloned()
-                        }),
-                };
-
-                let Some(opt) = opt else {
-                    if let Some(f) = &mut self.entry_form {
-                        f.error = Some("Select a project and task".into());
-                    }
-                    return Task::none();
-                };
-
-                let notes = form.notes_input.trim().to_string();
-                let notes_opt = if notes.is_empty() { None } else { Some(notes) };
-                let editing_id = form.editing_id;
-                let date = self.current_date.format("%Y-%m-%d").to_string();
-                let Some(client) = self.client.clone() else {
-                    return Task::none();
-                };
-
-                // M6-F3: mark the form as submitting before the async call so the
-                // view can disable the submit button and prevent double-submit.
-                if let Some(f) = &mut self.entry_form { f.submitting = true; }
-
-                // Record usage in favorites
-                self.favorites.record_use(opt.project_id, opt.task_id);
-                if let Err(e) = self.favorites.save(&self.settings.data_dir) {
-                    self.error_banner = Some(format!("Failed to save favorites: {e}"));
-                }
-                self.recompute_project_options();
-
-                if let Some(edit_id) = editing_id {
-                    let update = UpdateTimeEntry {
-                        project_id: Some(opt.project_id),
-                        task_id: Some(opt.task_id),
-                        spent_date: Some(date),
-                        hours: Some(hours),
-                        notes: notes_opt,
-                    };
-                    Task::perform(
-                        async move {
-                            client
-                                .update_time_entry(edit_id, &update)
-                                .await
-                                .map_err(|e| e.to_string())
-                        },
-                        |result| Message::Entry(Box::new(EntryMsg::Updated(result))),
-                    )
-                } else {
-                    let create = CreateTimeEntry {
-                        project_id: opt.project_id,
-                        task_id: opt.task_id,
-                        spent_date: date,
-                        hours,
-                        notes: notes_opt,
-                    };
-                    Task::perform(
-                        async move {
-                            client
-                                .create_time_entry(&create)
-                                .await
-                                .map_err(|e| e.to_string())
-                        },
-                        |result| Message::Entry(Box::new(EntryMsg::Created(result))),
-                    )
-                }
-            }
+            EntryMsg::StartTimer => self.submit_entry(true),
 
             EntryMsg::Created(result) => {
                 // A create submitted as the lead can still be in flight when
@@ -306,6 +216,10 @@ impl EasyHarvest {
                 if self.impersonating.is_some() { return Task::none(); }
                 match result {
                     Ok(entry) => {
+                        // Harvest stops any other timer when a new one starts.
+                        if entry.is_running {
+                            for e in &mut self.entries { e.is_running = false; }
+                        }
                         self.entries.push(entry);
                         self.entry_form = None;
                     }
@@ -503,6 +417,117 @@ impl EasyHarvest {
                 form.notes_input = tpl.notes.clone();
                 Task::none()
             }
+        }
+    }
+
+    /// Create or update the entry in the form. With `start_timer` the new
+    /// entry is created without hours, so Harvest starts its timer.
+    fn submit_entry(&mut self, start_timer: bool) -> Task<Message> {
+        if self.impersonating.is_some() { return Task::none(); }
+        let Some(form) = &self.entry_form else {
+            return Task::none();
+        };
+        let hours = if start_timer {
+            // Harvest only runs timers on today's sheet.
+            if form.editing_id.is_some()
+                || self.current_date != Local::now().naive_local().date()
+            {
+                if let Some(f) = &mut self.entry_form {
+                    f.error = Some("A timer can only be started today".into());
+                }
+                return Task::none();
+            }
+            None
+        } else {
+            match crate::ui::parse_hours(&form.hours_input) {
+                Some(h) => Some(h),
+                None => {
+                    if let Some(f) = &mut self.entry_form {
+                        f.error = Some("Enter a valid number of hours".into());
+                    }
+                    return Task::none();
+                }
+            }
+        };
+
+        let options = self.cached_project_options.clone();
+        // M4-F2: prefer the stable (project_id, task_id) key — it survives
+        // an assignments refresh that would invalidate the stored index.
+        let opt = match form.selected_project_key {
+            Some((project_id, task_id)) => options
+                .iter()
+                .find(|o| o.project_id == project_id && o.task_id == task_id)
+                .cloned(),
+            None => form.selected_project_idx
+                .and_then(|idx| options.get(idx).cloned())
+                .or_else(|| {
+                    options.iter().find(|o| {
+                        o.search_text.to_lowercase()
+                            == form.project_query.to_lowercase()
+                    }).cloned()
+                }),
+        };
+
+        let Some(opt) = opt else {
+            if let Some(f) = &mut self.entry_form {
+                f.error = Some("Select a project and task".into());
+            }
+            return Task::none();
+        };
+
+        let notes = form.notes_input.trim().to_string();
+        let notes_opt = if notes.is_empty() { None } else { Some(notes) };
+        let editing_id = form.editing_id;
+        let date = self.current_date.format("%Y-%m-%d").to_string();
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+
+        // M6-F3: mark the form as submitting before the async call so the
+        // view can disable the submit button and prevent double-submit.
+        if let Some(f) = &mut self.entry_form { f.submitting = true; }
+
+        // Record usage in favorites
+        self.favorites.record_use(opt.project_id, opt.task_id);
+        if let Err(e) = self.favorites.save(&self.settings.data_dir) {
+            self.error_banner = Some(format!("Failed to save favorites: {e}"));
+        }
+        self.recompute_project_options();
+
+        if let Some(edit_id) = editing_id {
+            let update = UpdateTimeEntry {
+                project_id: Some(opt.project_id),
+                task_id: Some(opt.task_id),
+                spent_date: Some(date),
+                hours,
+                notes: notes_opt,
+            };
+            Task::perform(
+                async move {
+                    client
+                        .update_time_entry(edit_id, &update)
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+                |result| Message::Entry(Box::new(EntryMsg::Updated(result))),
+            )
+        } else {
+            let create = CreateTimeEntry {
+                project_id: opt.project_id,
+                task_id: opt.task_id,
+                spent_date: date,
+                hours,
+                notes: notes_opt,
+            };
+            Task::perform(
+                async move {
+                    client
+                        .create_time_entry(&create)
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+                |result| Message::Entry(Box::new(EntryMsg::Created(result))),
+            )
         }
     }
 }

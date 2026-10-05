@@ -756,7 +756,7 @@ pub(super) fn build_vacation_entries(
                 project_id,
                 task_id,
                 spent_date: d.format("%Y-%m-%d").to_string(),
-                hours,
+                hours: Some(hours),
                 notes: None,
             });
         }

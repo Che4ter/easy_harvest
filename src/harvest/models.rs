@@ -67,7 +67,9 @@ pub struct CreateTimeEntry {
     pub project_id: i64,
     pub task_id: i64,
     pub spent_date: String,
-    pub hours: f64,
+    /// `None` makes Harvest create the entry with a running timer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hours: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
 }
@@ -139,4 +141,26 @@ pub struct ProjectTaskAssignment {
 pub struct ProjectAssignmentsResponse {
     pub project_assignments: Vec<ProjectAssignment>,
     pub total_pages: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create(hours: Option<f64>) -> serde_json::Value {
+        serde_json::to_value(CreateTimeEntry {
+            project_id: 1,
+            task_id: 2,
+            spent_date: "2026-10-05".into(),
+            hours,
+            notes: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn create_without_hours_omits_the_field_so_harvest_starts_a_timer() {
+        assert!(create(None).get("hours").is_none());
+        assert_eq!(create(Some(1.5))["hours"], 1.5);
+    }
 }

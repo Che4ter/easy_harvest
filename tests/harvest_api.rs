@@ -162,7 +162,7 @@ async fn test_create_update_delete_entry() {
             project_id: pa.project.id,
             task_id: ta.task.id,
             spent_date: test_date.to_string(),
-            hours: 0.25,
+            hours: Some(0.25),
             notes: Some("easy_harvest integration test — safe to delete".to_string()),
         })
         .await
@@ -452,7 +452,7 @@ async fn test_notes_round_trip() {
             project_id: pa.project.id,
             task_id: ta.task.id,
             spent_date: test_date.clone(),
-            hours: 0.25,
+            hours: Some(0.25),
             notes: Some(notes.clone()),
         })
         .await
@@ -490,7 +490,7 @@ async fn test_partial_update_preserves_other_fields() {
             project_id: pa.project.id,
             task_id: ta.task.id,
             spent_date: test_date.clone(),
-            hours: 0.25,
+            hours: Some(0.25),
             notes: Some("original notes".to_string()),
         })
         .await
@@ -538,7 +538,7 @@ async fn test_timer_restart_and_stop() {
             project_id: pa.project.id,
             task_id: ta.task.id,
             spent_date: test_date.clone(),
-            hours: 0.1,
+            hours: Some(0.1),
             notes: Some("easy_harvest timer test — safe to delete".to_string()),
         })
         .await
