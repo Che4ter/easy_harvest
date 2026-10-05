@@ -138,7 +138,6 @@ impl HarvestClient {
                 if let Some(to) = to {
                     req = req.query(&[("to", to)]);
                 }
-                req = req.query(&[("per_page", "100")]); // M3-F3: Harvest API max is 100
                 if let Some(page) = page {
                     req = req.query(&[("page", &page.to_string())]);
                 }
@@ -232,7 +231,6 @@ impl HarvestClient {
             .send_with_retry(|| {
                 let mut req =
                     self.request(reqwest::Method::GET, "/users/me/project_assignments");
-                req = req.query(&[("per_page", "100")]); // M3-F3: Harvest API max is 100
                 if let Some(page) = page {
                     req = req.query(&[("page", &page.to_string())]);
                 }
@@ -259,7 +257,6 @@ impl HarvestClient {
         let resp = self
             .send_with_retry(|| {
                 let mut req = self.request(reqwest::Method::GET, "/users");
-                req = req.query(&[("per_page", "100")]); // Harvest API max is 100
                 if let Some(page) = page {
                     req = req.query(&[("page", &page.to_string())]);
                 }
@@ -287,6 +284,10 @@ impl HarvestClient {
 /// page's items along with the total page count reported by the API;
 /// shared by every `list_all_*` method so the "loop until `page >=
 /// total_pages`" logic exists in exactly one place.
+///
+/// Callers deliberately omit `per_page`: Harvest's default is always its
+/// maximum (currently 2000), and an out-of-range value is rejected with a
+/// 422 rather than silently truncated.
 async fn paginate_all<T, Fut>(
     mut fetch_page: impl FnMut(i64) -> Fut,
 ) -> Result<Vec<T>, HarvestError>
