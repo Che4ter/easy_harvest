@@ -66,7 +66,9 @@ short_description = "Quick Harvest time entry booking from your desktop"
 long_description = "Book and review Harvest time entries without opening the web UI."
 copyright = "© Easy Harvest contributors"
 category = "Productivity"
-osx_minimum_system_version = "12.0"
+
+[package.metadata.bundle.osx]
+minimum_system_version = "12.0"
 
 [build-dependencies]
 winresource = "0.1"
