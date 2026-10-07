@@ -2810,3 +2810,30 @@ fn created_entry_for_another_day_is_not_listed() {
     assert!(app.entries.is_empty(), "user navigated away while the create was in flight");
     assert!(app.entry_form.is_none());
 }
+
+#[test]
+fn open_in_harvest_without_address_goes_to_settings() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.settings.harvest_web_address = None;
+    let _ = app.update_unsubmitted(UnsubmittedMsg::Loaded(Ok(one_week())));
+
+    // Returns a navigation task rather than silently doing nothing.
+    let task = app.update_unsubmitted(UnsubmittedMsg::OpenInHarvest);
+    assert!(task.units() > 0);
+}
+
+#[test]
+fn wizard_profile_continue_saves_web_address() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.settings_form.weekly_hours_input = "41".into();
+    app.settings_form.percentage_input = "100".into();
+    app.settings_form.holidays_input = "25".into();
+    app.settings_form.first_work_day_input = String::new();
+    app.settings_form.web_address_input = "acme.harvestapp.com/".into();
+
+    let _ = app.update_settings(SettingsMsg::WizardProfileContinue);
+
+    assert_eq!(app.settings.harvest_web_address.as_deref(), Some("https://acme.harvestapp.com"));
+}

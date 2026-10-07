@@ -456,6 +456,9 @@ impl EasyHarvest {
                 self.settings.work_percentage = work_percentage;
                 self.settings.first_work_day = first_work_day;
                 self.settings.total_holiday_days_per_year = holidays;
+                let web_address = crate::unsubmitted::normalize_web_address(&self.settings_form.web_address_input);
+                self.settings_form.web_address_input = web_address.clone().unwrap_or_default();
+                self.settings.harvest_web_address = web_address;
                 // Sync form inputs so the Settings page shows the correct values.
                 self.settings_form.weekly_hours_input = fmt_hours(total_weekly_hours);
                 self.settings_form.percentage_input = fmt_hours(pensum);

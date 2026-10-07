@@ -110,7 +110,8 @@ impl EasyHarvest {
             WorkDayMsg::Tick => {
                 #[cfg(not(target_os = "macos"))]
                 self.sync_tray_phase();
-                Task::none()
+                // Throttled, so this re-checks every few minutes while visible.
+                self.update_unsubmitted(UnsubmittedMsg::Check { force: false })
             }
 
             WorkDayMsg::EditStart => {

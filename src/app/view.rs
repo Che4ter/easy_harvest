@@ -198,10 +198,7 @@ fn impersonation_banner(name: &str) -> Element<'static, Message> {
 fn unsubmitted_banner(state: &EasyHarvest) -> Element<'_, Message> {
     let today = Local::now().naive_local().date();
     let mut actions = Vec::new();
-    if state.settings.harvest_web_address.is_some() {
-        actions.push(banner_btn("Open in Harvest", Message::Unsubmitted(UnsubmittedMsg::OpenInHarvest)));
-    }
-    actions.push(banner_btn("Recheck", Message::Unsubmitted(UnsubmittedMsg::Check { force: true })));
+    actions.push(banner_btn("Open in Harvest", Message::Unsubmitted(UnsubmittedMsg::OpenInHarvest)));
     actions.push(banner_btn("✕", Message::Unsubmitted(UnsubmittedMsg::Dismiss)));
     action_banner(
         crate::unsubmitted::banner_text(&state.unsubmitted_weeks, today),

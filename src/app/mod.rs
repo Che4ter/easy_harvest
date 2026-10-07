@@ -39,7 +39,7 @@ pub use billable::{BillablePageState, BillableSummary};
 pub use stats::StatsMsg;
 pub use stats::OvertimeAdjustmentForm;
 pub use vacation::VacationMsg;
-pub use unsubmitted_warning::UnsubmittedMsg;
+pub use unsubmitted_warning::{UnsubmittedMsg, WEB_ADDRESS_INPUT_ID};
 pub use vacation::{VacationForm, VacationPageState, VacationSummary};
 pub use work_day::WorkDayMsg;
 pub use work_day::WorkDayEditState;

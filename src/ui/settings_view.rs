@@ -263,6 +263,23 @@ fn wizard_profile(state: &EasyHarvest) -> Element<'_, Message> {
                 Space::new().width(92),
             ]
             .align_y(Alignment::Center),
+            // Harvest web address row (target of the banner's "Open in Harvest")
+            column![
+                text("Harvest web address")
+                    .font(FONT_REGULAR)
+                    .size(13)
+                    .color(TEXT_MUTED),
+                text("Optional — lets the unsubmitted-weeks banner open your timesheet.")
+                    .font(FONT_REGULAR)
+                    .size(11)
+                    .color(TEXT_MUTED),
+                text_input("yourcompany.harvestapp.com", &state.settings_form.web_address_input)
+                    .on_input(|v| Message::Settings(SettingsMsg::WebAddressChanged(v)))
+                    .size(13)
+                    .padding([7, 8])
+                    .style(input_style),
+            ]
+            .spacing(3),
             error_el,
             row![
                 outline_btn("Skip for now")
@@ -1125,6 +1142,7 @@ fn unsubmitted_section(state: &EasyHarvest) -> Element<'_, Message> {
                 text_input("yourcompany.harvestapp.com", &state.settings_form.web_address_input)
                     .on_input(|v| Message::Settings(SettingsMsg::WebAddressChanged(v)))
                     .on_submit(Message::Settings(SettingsMsg::SaveWebAddress))
+                    .id(iced::widget::Id::new(crate::app::WEB_ADDRESS_INPUT_ID))
                     .size(13)
                     .padding([8, 10])
                     .style(input_style),

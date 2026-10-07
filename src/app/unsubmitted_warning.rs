@@ -4,6 +4,9 @@ use super::*;
 use crate::unsubmitted::{submission_cutoff, unsubmitted_weeks, week_url, normalize_web_address, UnsubmittedWeek};
 
 /// Minimum gap between non-forced checks (window re-opened from the tray).
+/// Widget id of the Settings web-address field, focused by the banner button.
+pub const WEB_ADDRESS_INPUT_ID: &str = "web_address_input";
+
 pub(super) const CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone)]
@@ -91,10 +94,15 @@ impl EasyHarvest {
                 Task::none()
             }
             UnsubmittedMsg::OpenInHarvest => {
-                if let (Some(base), Some(oldest)) =
+                let (Some(base), Some(oldest)) =
                     (&self.settings.harvest_web_address, self.unsubmitted_weeks.first())
-                {
-                    let _ = open::that_detached(week_url(base, oldest.monday));
+                else {
+                    // No address known (non-admins can't look it up): ask for it.
+                    return Task::done(Message::Nav(NavMsg::PageChanged(Page::Settings)))
+                        .chain(iced::widget::operation::focus(WEB_ADDRESS_INPUT_ID));
+                };
+                if let Err(e) = open::that_detached(week_url(base, oldest.monday)) {
+                    eprintln!("Failed to open Harvest in the browser: {e}");
                 }
                 Task::none()
             }
