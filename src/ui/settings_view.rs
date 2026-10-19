@@ -23,7 +23,16 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         };
     }
 
-    let mut sections = column![
+    let mut sections = column![].spacing(SECTION_GAP);
+
+    // The banner's "Open in Harvest" button sends people here when no address
+    // is saved; keep the field in view instead of buried below the fold.
+    let address_missing = state.settings.harvest_web_address.is_none();
+    if address_missing {
+        sections = sections.push(unsubmitted_section(state));
+    }
+
+    sections = sections.push(column![
         sync_section(state),
         profile_section(state),
         carryover_section(state),
@@ -31,7 +40,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         holiday_tasks_section(state),
         templates_section(state),
     ]
-    .spacing(SECTION_GAP);
+    .spacing(SECTION_GAP));
 
     if state.harvest_user_is_admin && !state.settings.team_lead_mode && !state.settings.admin_hint_dismissed {
         sections = sections.push(admin_hint_section());
@@ -50,7 +59,9 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
     }
 
     sections = sections.push(data_dir_section(state));
-    sections = sections.push(unsubmitted_section(state));
+    if !address_missing {
+        sections = sections.push(unsubmitted_section(state));
+    }
     sections = sections.push(startup_section(state));
     sections = sections.push(connection_section(state));
     let version_footer: Element<'_, Message> =
