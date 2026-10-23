@@ -234,11 +234,14 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
     let work_day = state.work_day_store.get_or_default(state.current_date);
     let phase = work_day.phase();
 
-    if !is_today && phase == WorkPhase::NotStarted {
+    // Future days can't have worked hours; past days stay visible so forgotten
+    // days can be filled in.
+    if state.current_date > today && phase == WorkPhase::NotStarted {
         return Space::new().into();
     }
 
     let (phase_label, phase_color) = match phase {
+        WorkPhase::NotStarted if !is_today => ("Not recorded", TEXT_MUTED),
         WorkPhase::NotStarted => ("Not started", TEXT_MUTED),
         WorkPhase::Working    => ("Working",     SUCCESS),
         WorkPhase::OnBreak    => ("On break",    ACCENT),
@@ -287,6 +290,8 @@ fn work_day_strip(state: &EasyHarvest) -> Element<'_, Message> {
             .align_y(Alignment::Center)
             .into(),
         }
+    } else if phase == WorkPhase::NotStarted {
+        wd_secondary_btn("Add hours", Message::WorkDay(WorkDayMsg::EditStart))
     } else {
         Space::new().into()
     };
