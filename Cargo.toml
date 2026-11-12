@@ -35,7 +35,7 @@ dirs = "7"
 iced = { version = "0.14", features = ["tokio", "image", "advanced"] }
 
 # Native file/folder picker dialogs
-rfd = "0.17"
+rfd = "0.18"
 
 # Open URLs in the default browser
 open = "5"
