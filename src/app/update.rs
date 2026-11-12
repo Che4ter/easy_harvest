@@ -146,6 +146,18 @@ impl EasyHarvest {
                 Task::none()
             }
 
+            Message::WindowRescaled(id) => {
+                // Nudge the window by 1px so winit emits a Resized event and
+                // iced reconfigures the surface for the new scale factor.
+                window::size(id).then(move |size| {
+                    let nudged = iced::Size::new(size.width + 1.0, size.height);
+                    window::resize(id, nudged)
+                        .chain(Task::done(Message::WindowSizeRestore(id, size)))
+                })
+            }
+
+            Message::WindowSizeRestore(id, size) => window::resize(id, size),
+
             Message::WindowCloseRequested(id) => {
                 if self.tray_available {
                     // Close the window but keep the process alive (tray stays).

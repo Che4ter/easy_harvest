@@ -242,6 +242,10 @@ pub enum Message {
 
     // Window lifecycle
     WindowIdReceived(Option<window::Id>),
+    /// The window moved to a monitor with a different DPI scale.
+    WindowRescaled(window::Id),
+    /// Second step of the post-rescale surface refresh: restore the real size.
+    WindowSizeRestore(window::Id, iced::Size),
     WindowCloseRequested(window::Id),
 
     // Current user — fetched on startup so we can filter time-entry requests
