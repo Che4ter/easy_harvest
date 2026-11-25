@@ -3255,7 +3255,8 @@ fn drag_drop_keeps_positions_of_unloaded_cards() {
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(0));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
 
-    let expected = vec![H(3), H(1), H(2), M(7), H(99)];
+    // M(7) stays first; H(99) stays right after H(1).
+    let expected = vec![M(7), H(3), H(1), H(99), H(2)];
     assert_eq!(app.project_tracking.layout.order, expected);
     assert_eq!(ProjectTrackingLayout::load(dir.path()).order, expected);
 }

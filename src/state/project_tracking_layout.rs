@@ -58,16 +58,13 @@ impl ProjectTrackingLayout {
     }
 
     /// Sets `order = current`, moves the card at `from` to insertion slot `to`
-    /// (0..=len, measured on the list before removal), then appends keys of
-    /// the previous order absent from `current` (e.g. other years' budgets or
-    /// managed cards not loaded yet), keeping their relative order.
+    /// (0..=len, measured on the list before removal), then re-inserts keys
+    /// of the previous order absent from `current` (e.g. other years' budgets
+    /// or managed cards not loaded yet): each goes right after the nearest
+    /// earlier key of the previous order that is still in the list (at the
+    /// front if none), so they keep their positions and relative order.
     pub fn move_card(&mut self, current: &[CardKey], from: usize, to: usize) {
-        let absent: Vec<CardKey> = self
-            .order
-            .iter()
-            .copied()
-            .filter(|k| !current.contains(k))
-            .collect();
+        let previous = std::mem::take(&mut self.order);
         self.order = current.to_vec();
         let len = self.order.len();
         if from < len && to <= len && to != from && to != from + 1 {
@@ -75,7 +72,17 @@ impl ProjectTrackingLayout {
             let insert_at = if to > from { to - 1 } else { to };
             self.order.insert(insert_at, key);
         }
-        self.order.extend(absent);
+        for (i, key) in previous.iter().enumerate() {
+            if current.contains(key) || self.order.contains(key) {
+                continue;
+            }
+            let insert_at = previous[..i]
+                .iter()
+                .rev()
+                .find_map(|k| self.order.iter().position(|o| o == k))
+                .map_or(0, |pos| pos + 1);
+            self.order.insert(insert_at, *key);
+        }
     }
 
     pub fn set_hidden(&mut self, key: CardKey, hidden: bool) {
@@ -159,7 +166,31 @@ mod tests {
             hidden: vec![],
         };
         layout.move_card(&[H(1), H(2), H(3)], 2, 0);
-        assert_eq!(layout.order, vec![H(3), H(1), H(2), M(7), H(9)]);
+        // M(7) had no earlier key: front. H(9) followed H(2): right after it.
+        assert_eq!(layout.order, vec![M(7), H(3), H(1), H(2), H(9)]);
+    }
+
+    #[test]
+    fn move_card_keeps_other_years_positions() {
+        // 2026 shows H1, M26, H2; in 2025 (H1, H2, M25) M25 moves to the top.
+        let mut layout = ProjectTrackingLayout {
+            order: vec![H(1), M(26), H(2)],
+            hidden: vec![],
+        };
+        layout.move_card(&[H(1), H(2), M(25)], 2, 0);
+        assert_eq!(layout.order, vec![M(25), H(1), M(26), H(2)]);
+        let present_2026 = named(&[(H(1), "a"), (H(2), "b"), (M(26), "c")]);
+        assert_eq!(layout.ordered(&present_2026), vec![H(1), M(26), H(2)]);
+    }
+
+    #[test]
+    fn move_card_keeps_consecutive_absent_keys_together() {
+        let mut layout = ProjectTrackingLayout {
+            order: vec![M(8), M(9), H(1), M(5), M(6), H(2)],
+            hidden: vec![],
+        };
+        layout.move_card(&[H(1), H(2)], 1, 0);
+        assert_eq!(layout.order, vec![M(8), M(9), H(2), H(1), M(5), M(6)]);
     }
 
     #[test]
