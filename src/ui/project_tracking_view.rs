@@ -385,11 +385,22 @@ fn manual_header(id: u64, name: &str) -> iced::widget::Row<'_, Message> {
     .align_y(Alignment::Center)
 }
 
+/// Split segments a manual card shows as a stacked bar with legend. Empty
+/// (plain usage-coloured bar) when the effective scope is Me or at most one
+/// person has hours.
+fn manual_split_segments(summary: &BudgetSummary) -> Vec<(&crate::app::Segment, Color)> {
+    if summary.budget.scope == BudgetScope::Me {
+        return Vec::new();
+    }
+    let segments = colored_segments(&summary.split);
+    if segments.len() <= 1 { Vec::new() } else { segments }
+}
+
 fn budget_card(summary: &BudgetSummary, index: usize) -> Element<'_, Message> {
     let pct = summary.pct_used;
     let bar_color = usage_color(pct);
 
-    let segments = colored_segments(&summary.split);
+    let segments = manual_split_segments(summary);
     let bar = if segments.is_empty() {
         progress_bar(pct.min(1.0) as f32, bar_color, 6)
     } else {
@@ -617,4 +628,52 @@ fn budget_form<'a>(state: &'a EasyHarvest, form: &'a crate::app::BudgetForm) -> 
     .padding(14)
     .width(Length::Fill)
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::Segment;
+    use crate::state::project_budgets::ProjectBudget;
+
+    fn summary(scope: BudgetScope, people: &[(i64, f64)]) -> BudgetSummary {
+        let segments = people
+            .iter()
+            .map(|&(id, hours)| Segment { user_id: Some(id), label: format!("U{id}"), hours })
+            .collect();
+        BudgetSummary {
+            budget: ProjectBudget {
+                id: 1,
+                name: "Edu".into(),
+                budget_hours: 10.0,
+                project_ids: vec![1],
+                task_ids: vec![],
+                scope,
+            },
+            used_hours: people.iter().map(|p| p.1).sum(),
+            remaining_hours: 0.0,
+            pct_used: 1.2,
+            split: PersonSplit { segments, approximate: false },
+        }
+    }
+
+    #[test]
+    fn me_scope_manual_card_uses_plain_bar() {
+        assert!(manual_split_segments(&summary(BudgetScope::Me, &[(1, 12.0)])).is_empty());
+        assert!(manual_split_segments(&summary(BudgetScope::Me, &[(1, 6.0), (2, 6.0)])).is_empty());
+    }
+
+    #[test]
+    fn team_scope_manual_card_with_one_person_uses_plain_bar() {
+        assert!(manual_split_segments(&summary(BudgetScope::MeAndTeam, &[(1, 12.0)])).is_empty());
+        assert!(
+            manual_split_segments(&summary(BudgetScope::MeAndTeam, &[(1, 12.0), (2, 0.0)])).is_empty()
+        );
+    }
+
+    #[test]
+    fn team_scope_manual_card_with_several_people_is_stacked() {
+        let s = summary(BudgetScope::MeAndTeam, &[(1, 6.0), (2, 6.0)]);
+        assert_eq!(manual_split_segments(&s).len(), 2);
+    }
 }
