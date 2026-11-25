@@ -93,6 +93,36 @@ impl ProjectTrackingPageState {
     }
 }
 
+/// Title of a managed card: `"{project} · {client}"`.
+pub(crate) fn managed_card_title(m: &super::ManagedBudget) -> String {
+    format!("{} · {}", m.project_name, m.client_name)
+}
+
+/// Card keys of the Projects page in display order, split into visible and
+/// hidden: managed projects plus manual budgets of the selected year.
+/// Unordered cards are sorted by their title.
+pub(crate) fn visible_and_hidden_cards(
+    state: &ProjectTrackingPageState,
+) -> (Vec<CardKey>, Vec<CardKey>) {
+    let present: Vec<(CardKey, String)> = state
+        .managed
+        .iter()
+        .map(|m| (CardKey::Harvest(m.project_id), managed_card_title(m)))
+        .chain(
+            state
+                .budgets
+                .budgets_for(state.year)
+                .iter()
+                .map(|b| (CardKey::Manual(b.id), b.name.clone())),
+        )
+        .collect();
+    state
+        .layout
+        .ordered(&present)
+        .into_iter()
+        .partition(|k| !state.layout.is_hidden(*k))
+}
+
 // ── Messages ────────────────────────────────────────────────────────────────
 
 /// Raw inputs for managed budgets: the user's project assignments and the
@@ -431,5 +461,71 @@ impl EasyHarvest {
             self.project_tracking.layout = previous;
             self.error_banner = Some(format!("Failed to save project layout: {e}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn managed(project_id: i64, project_name: &str) -> super::super::ManagedBudget {
+        super::super::ManagedBudget {
+            project_id,
+            project_name: project_name.to_string(),
+            client_name: "Client".to_string(),
+            budget_hours: 100.0,
+            spent_hours: 10.0,
+            remaining_hours: 90.0,
+            is_monthly: false,
+            budget_by: "project".to_string(),
+        }
+    }
+
+    fn manual(id: u64, name: &str) -> ProjectBudget {
+        ProjectBudget {
+            id,
+            name: name.to_string(),
+            budget_hours: 50.0,
+            project_ids: vec![1],
+            task_ids: Vec::new(),
+            scope: BudgetScope::Me,
+        }
+    }
+
+    fn state() -> ProjectTrackingPageState {
+        let mut s = ProjectTrackingPageState { year: 2026, ..Default::default() };
+        s.managed = vec![managed(10, "Zeta"), managed(11, "Alpha")];
+        s.budgets.budgets_for_mut(2026).push(manual(1, "Middle"));
+        s
+    }
+
+    #[test]
+    fn cards_sorted_by_title_without_stored_order() {
+        let (visible, hidden) = visible_and_hidden_cards(&state());
+        assert_eq!(
+            visible,
+            vec![CardKey::Harvest(11), CardKey::Manual(1), CardKey::Harvest(10)]
+        );
+        assert!(hidden.is_empty());
+    }
+
+    #[test]
+    fn cards_follow_stored_order_and_hidden_are_split_out() {
+        let mut s = state();
+        s.layout.order = vec![CardKey::Harvest(10), CardKey::Manual(1)];
+        s.layout.set_hidden(CardKey::Manual(1), true);
+        let (visible, hidden) = visible_and_hidden_cards(&s);
+        assert_eq!(visible, vec![CardKey::Harvest(10), CardKey::Harvest(11)]);
+        assert_eq!(hidden, vec![CardKey::Manual(1)]);
+    }
+
+    #[test]
+    fn manual_budgets_of_other_years_are_excluded() {
+        let mut s = state();
+        s.budgets.budgets_for_mut(2025).push(manual(2, "Old"));
+        s.layout.set_hidden(CardKey::Manual(2), true);
+        let (visible, hidden) = visible_and_hidden_cards(&s);
+        assert!(!visible.contains(&CardKey::Manual(2)));
+        assert!(hidden.is_empty());
     }
 }

@@ -234,6 +234,92 @@ pub fn progress_bar(
         .into()
 }
 
+/// Per-person segment colours of stacked budget bars, in segment order.
+/// Chosen to read on the dark surfaces and stay distinct from `DANGER`.
+pub const SPLIT_PALETTE: [Color; 4] = [
+    Color { r: 0.376, g: 0.647, b: 0.980, a: 1.0 }, // sky blue
+    Color { r: 0.655, g: 0.545, b: 0.980, a: 1.0 }, // violet
+    Color { r: 0.176, g: 0.831, b: 0.749, a: 1.0 }, // teal
+    Color { r: 0.984, g: 0.749, b: 0.141, a: 1.0 }, // amber
+];
+
+/// Colour of the aggregated "Others" segment — muted grey.
+pub const OTHERS_COLOR: Color = Color { r: 0.420, g: 0.447, b: 0.525, a: 1.0 };
+
+/// A progress bar made of several coloured segments laid out left to right.
+///
+/// `segments` — `(fraction of the whole bar, colour)`; fractions are clamped
+/// so they sum to at most 1. The remaining track uses the same empty style as
+/// [`progress_bar`].
+pub fn stacked_progress_bar(
+    segments: &[(f32, Color)],
+    height: u16,
+) -> Element<'static, Message> {
+    let r = height as f32 / 2.0;
+    let mut used: u16 = 0;
+    let mut parts: Vec<(u16, Color)> = Vec::with_capacity(segments.len());
+    for &(fraction, color) in segments {
+        let portions = ((fraction.max(0.0) * 1000.0) as u16).min(1000 - used);
+        if portions > 0 {
+            parts.push((portions, color));
+            used += portions;
+        }
+    }
+    let last = parts.len().saturating_sub(1);
+    let mut cells: Vec<Element<Message>> = parts
+        .into_iter()
+        .enumerate()
+        .map(|(i, (portions, color))| {
+            let left = if i == 0 { r } else { 0.0 };
+            let right = if i == last { r } else { 0.0 };
+            let radius = iced::border::Radius {
+                top_left: left,
+                top_right: right,
+                bottom_right: right,
+                bottom_left: left,
+            };
+            container(Space::new())
+                .style(move |_: &iced::Theme| container::Style {
+                    background: Some(iced::Background::Color(color)),
+                    border: Border { radius, ..Default::default() },
+                    ..Default::default()
+                })
+                .width(Length::FillPortion(portions))
+                .height(height as f32)
+                .into()
+        })
+        .collect();
+    let empty_portions = 1000 - used;
+    if empty_portions > 0 {
+        cells.push(Space::new().width(Length::FillPortion(empty_portions)).height(height as f32).into());
+    }
+
+    container(iced::widget::Row::with_children(cells).spacing(0))
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(SURFACE_RAISED)),
+            border: Border { radius: r.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .width(Length::Fill)
+        .height(height as f32)
+        .into()
+}
+
+/// Small muted outline chip, e.g. "Manual" next to a card title.
+pub fn badge(label: &str) -> Element<'_, Message> {
+    container(text(label).font(FONT_MEDIUM).size(11).color(TEXT_MUTED))
+        .style(|_: &iced::Theme| container::Style {
+            border: Border {
+                color: with_alpha(TEXT_MUTED, 0.5),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+        .padding([1, 6])
+        .into()
+}
+
 /// Like [`progress_bar`] but with a thin vertical tick at `marker_pct` to show
 /// a secondary threshold (e.g. the daily expected-hours target on a booking bar).
 ///

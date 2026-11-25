@@ -97,16 +97,16 @@ pub fn compute_person_split(
 
     let raw: f64 = users.iter().map(|u| u.2).sum();
     let mut others = users.split_off(top_n.min(users.len()));
-    if let Some(me) = current_user_id {
-        if top_n > 0 && !users.iter().any(|u| u.0 == me) {
-            if let Some(pos) = others.iter().position(|u| u.0 == me) {
-                let mine = others.remove(pos);
-                let displaced = users.pop().expect("top_n > 0 and others non-empty");
-                others.push(displaced);
-                users.push(mine);
-                users.sort_by(by_hours);
-            }
-        }
+    if let Some(me) = current_user_id
+        && top_n > 0
+        && !users.iter().any(|u| u.0 == me)
+        && let Some(pos) = others.iter().position(|u| u.0 == me)
+    {
+        let mine = others.remove(pos);
+        let displaced = users.pop().expect("top_n > 0 and others non-empty");
+        others.push(displaced);
+        users.push(mine);
+        users.sort_by(by_hours);
     }
 
     let mut segments: Vec<Segment> = users
@@ -127,14 +127,14 @@ pub fn compute_person_split(
     }
 
     let mut approximate = false;
-    if let Some(t) = target_total {
-        if raw > 0.0 {
-            let factor = t / raw;
-            for s in &mut segments {
-                s.hours *= factor;
-            }
-            approximate = t > 0.0 && (raw - t).abs() / t > 0.05;
+    if let Some(t) = target_total
+        && raw > 0.0
+    {
+        let factor = t / raw;
+        for s in &mut segments {
+            s.hours *= factor;
         }
+        approximate = t > 0.0 && (raw - t).abs() / t > 0.05;
     }
     PersonSplit { segments, approximate }
 }
