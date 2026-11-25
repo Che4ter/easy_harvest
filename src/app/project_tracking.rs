@@ -84,9 +84,6 @@ pub struct ProjectTrackingPageState {
     pub managed: Vec<super::ManagedBudget>,
     pub managed_splits: HashMap<i64, SplitState>,
     pub managed_loading: bool,
-    /// Generation for managed loads; separate from `project_tracking_gen` so
-    /// year switches (which reload manual entries) don't drop managed results.
-    pub managed_gen: u64,
     pub layout: ProjectTrackingLayout,
     pub show_hidden: bool,
     pub drag: Option<DragState>,
@@ -267,7 +264,7 @@ impl EasyHarvest {
             }
 
             ProjectTrackingMsg::ManagedLoaded(r#gen, result) => {
-                if r#gen != self.project_tracking.managed_gen { return Task::none(); }
+                if r#gen != self.managed_budgets_gen { return Task::none(); }
                 self.project_tracking.managed_loading = false;
                 match result {
                     Ok(Some((assignments, reports))) => {
@@ -293,7 +290,7 @@ impl EasyHarvest {
             }
 
             ProjectTrackingMsg::SplitLoaded(r#gen, project_id, result) => {
-                if r#gen != self.project_tracking.managed_gen { return Task::none(); }
+                if r#gen != self.managed_budgets_gen { return Task::none(); }
                 let state = match result {
                     Ok(split) => SplitState::Ready(split),
                     Err(_) => SplitState::Failed,
@@ -511,7 +508,7 @@ impl EasyHarvest {
         if self.client.is_none() {
             return Task::none();
         }
-        self.project_tracking.managed_gen += 1;
+        self.managed_budgets_gen += 1;
         self.project_tracking.managed_loading = true;
         self.load_managed_budgets_task()
     }

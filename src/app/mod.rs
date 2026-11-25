@@ -316,6 +316,12 @@ pub struct EasyHarvest {
     pub billable_gen: u64,
     pub stats_gen: u64,
     pub project_tracking_gen: u64,
+    /// Generation for managed project budget loads; separate from
+    /// `project_tracking_gen` so year switches (which reload manual entries)
+    /// don't drop managed results. Lives here, not on the Projects page
+    /// state, so it keeps counting when that state is rebuilt (disconnect,
+    /// data folder change) and stale in-flight results can't match.
+    pub managed_budgets_gen: u64,
     /// Bumped whenever the personal carryover-sync chain is restarted from
     /// scratch (`CarryoverReset`/`SaveProfile` with a changed first work
     /// day). A stale `CarryoverSyncLoaded` from an earlier, superseded chain
@@ -503,6 +509,7 @@ impl EasyHarvest {
             billable_gen: 0,
             stats_gen: 0,
             project_tracking_gen: 0,
+            managed_budgets_gen: 0,
             carryover_sync_gen: 0,
             settings_form: SettingsFormState {
                 weekly_hours_input: init_weekly,
@@ -630,6 +637,7 @@ impl EasyHarvest {
             billable_gen: 0,
             stats_gen: 0,
             project_tracking_gen: 0,
+            managed_budgets_gen: 0,
             carryover_sync_gen: 0,
             settings_form: SettingsFormState::new(today.year()),
             template_form: TemplateFormState::default(),

@@ -2919,7 +2919,7 @@ fn managed_loaded_403_shows_manual_only() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());
     app.project_tracking.managed_loading = true;
-    let r#gen = app.project_tracking.managed_gen;
+    let r#gen = app.managed_budgets_gen;
 
     let _ = app.update_project_tracking(ProjectTrackingMsg::ManagedLoaded(r#gen, Ok(None)));
 
@@ -2968,7 +2968,7 @@ fn managed_loaded_computes_budgets_and_marks_splits_loading() {
         budget_remaining: Some(70.0),
     };
     app.project_tracking.managed_loading = true;
-    let r#gen = app.project_tracking.managed_gen;
+    let r#gen = app.managed_budgets_gen;
 
     let _ = app.update_project_tracking(ProjectTrackingMsg::ManagedLoaded(
         r#gen,
@@ -2989,7 +2989,7 @@ fn managed_loaded_computes_budgets_and_marks_splits_loading() {
 fn stale_managed_loaded_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());
-    app.project_tracking.managed_gen = 2;
+    app.managed_budgets_gen = 2;
     app.project_tracking.managed_loading = true;
 
     let _ = app.update_project_tracking(ProjectTrackingMsg::ManagedLoaded(1, Err("boom".into())));
@@ -2999,11 +2999,29 @@ fn stale_managed_loaded_ignored() {
 }
 
 #[test]
+fn managed_gen_survives_projects_state_rebuild() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    // A managed load with generation 3 is in flight when the page state is
+    // rebuilt (disconnect, data folder change); the generation must not
+    // restart, or that stale result could match a later load.
+    app.managed_budgets_gen = 3;
+    app.project_tracking = ProjectTrackingPageState::new(dir.path(), 2026);
+    assert_eq!(app.managed_budgets_gen, 3);
+
+    app.managed_budgets_gen += 1;
+    app.project_tracking.managed_loading = true;
+    let _ = app.update_project_tracking(ProjectTrackingMsg::ManagedLoaded(3, Err("stale".into())));
+    assert!(app.project_tracking.managed_loading);
+    assert_eq!(app.error_banner, None);
+}
+
+#[test]
 fn managed_loaded_error_sets_banner() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());
     app.project_tracking.managed_loading = true;
-    let r#gen = app.project_tracking.managed_gen;
+    let r#gen = app.managed_budgets_gen;
 
     let _ = app.update_project_tracking(ProjectTrackingMsg::ManagedLoaded(r#gen, Err("boom".into())));
 
@@ -3015,7 +3033,7 @@ fn managed_loaded_error_sets_banner() {
 fn stale_split_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());
-    app.project_tracking.managed_gen = 2;
+    app.managed_budgets_gen = 2;
     app.project_tracking.managed = vec![managed_budget(42)];
     app.project_tracking.managed_splits.insert(42, SplitState::Loading);
     let split = PersonSplit { segments: vec![], approximate: false };
@@ -3034,7 +3052,7 @@ fn split_loaded_sets_ready() {
     let mut app = EasyHarvest::test_instance(dir.path());
     app.project_tracking.managed = vec![managed_budget(42)];
     app.project_tracking.managed_splits.insert(42, SplitState::Loading);
-    let r#gen = app.project_tracking.managed_gen;
+    let r#gen = app.managed_budgets_gen;
     let split = PersonSplit { segments: vec![], approximate: true };
 
     let _ = app.update_project_tracking(ProjectTrackingMsg::SplitLoaded(r#gen, 42, Ok(split.clone())));
@@ -3051,7 +3069,7 @@ fn failed_split_keeps_totals() {
     let mut app = EasyHarvest::test_instance(dir.path());
     app.project_tracking.managed = vec![managed_budget(42)];
     app.project_tracking.managed_splits.insert(42, SplitState::Loading);
-    let r#gen = app.project_tracking.managed_gen;
+    let r#gen = app.managed_budgets_gen;
 
     let _ = app.update_project_tracking(ProjectTrackingMsg::SplitLoaded(r#gen, 42, Err("nope".into())));
 
@@ -3096,12 +3114,12 @@ fn year_switch_keeps_managed_data() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = EasyHarvest::test_instance(dir.path());
     app.project_tracking.managed = vec![managed_budget(42)];
-    let before = app.project_tracking.managed_gen;
+    let before = app.managed_budgets_gen;
 
     let _ = app.update_project_tracking(ProjectTrackingMsg::YearPrev);
 
     assert_eq!(app.project_tracking.managed.len(), 1);
-    assert_eq!(app.project_tracking.managed_gen, before);
+    assert_eq!(app.managed_budgets_gen, before);
 }
 
 /// App with three managed cards, displayed as Project 1, Project 2, Project 3.

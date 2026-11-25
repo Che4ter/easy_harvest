@@ -718,7 +718,7 @@ impl EasyHarvest {
         let Some(client) = self.client.clone() else {
             return Task::none();
         };
-        let r#gen = self.project_tracking.managed_gen;
+        let r#gen = self.managed_budgets_gen;
         Task::perform(
             async move {
                 let fetched = async {
@@ -744,7 +744,7 @@ impl EasyHarvest {
         let Some(client) = self.client.clone() else {
             return Task::none();
         };
-        let r#gen = self.project_tracking.managed_gen;
+        let r#gen = self.managed_budgets_gen;
         let user_id = self.harvest_user_id;
         let month_start = Local::now().date_naive().with_day(1).unwrap_or_else(|| Local::now().date_naive());
         let month_start = month_start.format("%Y-%m-%d").to_string();
