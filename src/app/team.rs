@@ -252,6 +252,7 @@ impl EasyHarvest {
                     return Task::none();
                 }
                 self.team.add_form = TeamMemberForm::default();
+                self.invalidate_project_tracking_entries();
                 Task::batch(vec![
                     Task::done(Message::Team(TeamMsg::Refresh)),
                     self.detect_member_first_work_day_task(harvest_user_id),
@@ -266,6 +267,7 @@ impl EasyHarvest {
                 self.team.work_percentage_inputs.remove(&id);
                 self.team.carryover_sync_gen.remove(&id);
                 self.team.r#gen += 1;
+                self.invalidate_project_tracking_entries();
                 // Delegate to the real exit path: clearing the flag alone would
                 // leave the removed member's cached entries, vacation and stats
                 // on screen with no read-only banner and every mutation control

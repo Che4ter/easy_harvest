@@ -802,6 +802,15 @@ impl EasyHarvest {
             compute_budget_summaries(&budgets, entries, self.harvest_user_id);
     }
 
+    /// Drops loaded manual-budget entries and summaries after a team setting
+    /// changed (team lead mode, member list), so "Me + team" budgets reload
+    /// with the current members the next time the Projects page opens.
+    pub(super) fn invalidate_project_tracking_entries(&mut self) {
+        self.project_tracking.entries.clear();
+        self.project_tracking.entries.shrink_to_fit();
+        self.project_tracking.summaries.clear();
+    }
+
     /// Whether "Me + team" can take effect: team lead mode on and members exist.
     pub(super) fn team_scope_active(&self) -> bool {
         self.settings.team_lead_mode && !self.team_settings.members.is_empty()

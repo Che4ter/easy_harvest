@@ -933,6 +933,7 @@ impl EasyHarvest {
             SettingsMsg::TeamLeadModeToggle => {
                 self.settings.team_lead_mode = !self.settings.team_lead_mode;
                 self.save_settings_or_warn();
+                self.invalidate_project_tracking_entries();
                 Task::none()
             }
 

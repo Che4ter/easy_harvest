@@ -3206,3 +3206,59 @@ fn drag_drop_keeps_positions_of_unloaded_cards() {
     assert_eq!(app.project_tracking.layout.order, expected);
     assert_eq!(ProjectTrackingLayout::load(dir.path()).order, expected);
 }
+
+/// Seeds loaded manual-budget entries and a summary on the Projects page.
+fn seed_project_tracking_entries(app: &mut EasyHarvest) {
+    use crate::state::project_budgets::{BudgetScope, ProjectBudget};
+
+    let year = app.project_tracking.year;
+    *app.project_tracking.budgets.budgets_for_mut(year) = vec![ProjectBudget {
+        id: 1,
+        name: "Edu".into(),
+        budget_hours: 100.0,
+        project_ids: vec![10],
+        task_ids: vec![],
+        scope: BudgetScope::MeAndTeam,
+    }];
+    app.project_tracking.entries = vec![make_entry(1, 10, 1, 5.0, false)];
+    app.recompute_project_tracking_summaries();
+    assert_eq!(app.project_tracking.summaries.len(), 1);
+}
+
+#[test]
+fn team_settings_changes_invalidate_project_tracking_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+
+    seed_project_tracking_entries(&mut app);
+    let _ = app.update_settings(SettingsMsg::TeamLeadModeToggle);
+    assert!(app.project_tracking.entries.is_empty());
+    assert!(app.project_tracking.summaries.is_empty());
+
+    seed_project_tracking_entries(&mut app);
+    app.team.add_form.name_input = "Alex".into();
+    app.team.add_form.id_input = "555".into();
+    let _ = app.update_team(TeamMsg::AddMember);
+    assert_eq!(app.team_settings.members.len(), 1);
+    assert!(app.project_tracking.entries.is_empty());
+    assert!(app.project_tracking.summaries.is_empty());
+
+    seed_project_tracking_entries(&mut app);
+    let _ = app.update_team(TeamMsg::RemoveMember(555));
+    assert!(app.team_settings.members.is_empty());
+    assert!(app.project_tracking.entries.is_empty());
+    assert!(app.project_tracking.summaries.is_empty());
+}
+
+#[test]
+fn rejected_add_member_keeps_project_tracking_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    seed_project_tracking_entries(&mut app);
+    app.team.add_form.id_input = "555".into();
+
+    let _ = app.update_team(TeamMsg::AddMember);
+
+    assert_eq!(app.project_tracking.entries.len(), 1);
+    assert_eq!(app.project_tracking.summaries.len(), 1);
+}
