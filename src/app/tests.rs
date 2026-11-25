@@ -3188,3 +3188,21 @@ fn drag_drop_preserves_hidden_positions() {
     assert_eq!(visible, vec![H(3), H(1)]);
     assert_eq!(hidden, vec![H(2)]);
 }
+
+#[test]
+fn drag_drop_keeps_positions_of_unloaded_cards() {
+    use crate::state::project_tracking_layout::{CardKey::Harvest as H, CardKey::Manual as M, ProjectTrackingLayout};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = drag_test_app(dir.path());
+    // M(7): manual budget of another year; H(99): managed card not loaded.
+    app.project_tracking.layout.order = vec![M(7), H(1), H(99), H(2), H(3)];
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(2));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
+
+    let expected = vec![H(3), H(1), H(2), M(7), H(99)];
+    assert_eq!(app.project_tracking.layout.order, expected);
+    assert_eq!(ProjectTrackingLayout::load(dir.path()).order, expected);
+}

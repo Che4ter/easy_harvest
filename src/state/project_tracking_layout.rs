@@ -57,16 +57,25 @@ impl ProjectTrackingLayout {
         self.hidden.retain(|k| present.contains(k));
     }
 
-    /// Sets `order = current`, then moves the card at `from` to insertion slot
-    /// `to` (0..=len, measured on the list before removal).
+    /// Sets `order = current`, moves the card at `from` to insertion slot `to`
+    /// (0..=len, measured on the list before removal), then appends keys of
+    /// the previous order absent from `current` (e.g. other years' budgets or
+    /// managed cards not loaded yet), keeping their relative order.
     pub fn move_card(&mut self, current: &[CardKey], from: usize, to: usize) {
+        let absent: Vec<CardKey> = self
+            .order
+            .iter()
+            .copied()
+            .filter(|k| !current.contains(k))
+            .collect();
         self.order = current.to_vec();
-        if from >= self.order.len() || to > self.order.len() || to == from || to == from + 1 {
-            return;
+        let len = self.order.len();
+        if from < len && to <= len && to != from && to != from + 1 {
+            let key = self.order.remove(from);
+            let insert_at = if to > from { to - 1 } else { to };
+            self.order.insert(insert_at, key);
         }
-        let key = self.order.remove(from);
-        let insert_at = if to > from { to - 1 } else { to };
-        self.order.insert(insert_at, key);
+        self.order.extend(absent);
     }
 
     pub fn set_hidden(&mut self, key: CardKey, hidden: bool) {
@@ -141,6 +150,16 @@ mod tests {
         let mut layout = ProjectTrackingLayout::default();
         layout.move_card(&[H(1), H(2), H(3)], 2, 0);
         assert_eq!(layout.order, vec![H(3), H(1), H(2)]);
+    }
+
+    #[test]
+    fn move_card_keeps_absent_keys() {
+        let mut layout = ProjectTrackingLayout {
+            order: vec![M(7), H(2), H(9), H(1)],
+            hidden: vec![],
+        };
+        layout.move_card(&[H(1), H(2), H(3)], 2, 0);
+        assert_eq!(layout.order, vec![H(3), H(1), H(2), M(7), H(9)]);
     }
 
     #[test]
