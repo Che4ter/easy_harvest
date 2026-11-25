@@ -753,6 +753,7 @@ fn vacation_submit_prefers_non_billable_project() {
         project: ProjectRef { id: 100, name: "Billable Project".into(), code: None },
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
+        is_project_manager: false,
         task_assignments: vec![ProjectTaskAssignment {
             id: 1,
             task: TaskRef { id: task_id, name: "Holiday".into() },
@@ -766,6 +767,7 @@ fn vacation_submit_prefers_non_billable_project() {
         project: ProjectRef { id: 200, name: "Internal Project".into(), code: None },
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
+        is_project_manager: false,
         task_assignments: vec![ProjectTaskAssignment {
             id: 2,
             task: TaskRef { id: task_id, name: "Holiday".into() },
@@ -790,6 +792,7 @@ fn vacation_submit_prefers_non_billable_project() {
         project: ProjectRef { id: 300, name: "Billable 2".into(), code: None },
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
+        is_project_manager: false,
         task_assignments: vec![ProjectTaskAssignment {
             id: 3,
             task: TaskRef { id: task_id, name: "Holiday".into() },
@@ -803,6 +806,7 @@ fn vacation_submit_prefers_non_billable_project() {
             project: ProjectRef { id: 400, name: "First Billable".into(), code: None },
             client: ClientRef { id: 1, name: "Client".into() },
             is_active: true,
+            is_project_manager: false,
             task_assignments: vec![ProjectTaskAssignment {
                 id: 4,
                 task: TaskRef { id: task_id, name: "Holiday".into() },
@@ -953,6 +957,7 @@ fn assignments_loaded_discards_stale_generation() {
         project: ProjectRef { id: 999, name: "Stale Project".into(), code: None },
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
+        is_project_manager: false,
         task_assignments: vec![],
     };
     let _ = app.update_entries(EntryMsg::AssignmentsLoaded(1, Ok(vec![stale_assignment])));
@@ -1105,6 +1110,7 @@ fn project_tracking_project_selected_correct_with_inactive_interspersed() {
         project: ProjectRef { id: 1000, name: "Inactive B".into(), code: None },
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: false,
+        is_project_manager: false,
         task_assignments: vec![],
     };
     let active_a = ProjectAssignment {
@@ -1112,6 +1118,7 @@ fn project_tracking_project_selected_correct_with_inactive_interspersed() {
         project: ProjectRef { id: 2000, name: "Active A".into(), code: None },
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
+        is_project_manager: false,
         task_assignments: vec![],
     };
     let active_c = ProjectAssignment {
@@ -1119,6 +1126,7 @@ fn project_tracking_project_selected_correct_with_inactive_interspersed() {
         project: ProjectRef { id: 3000, name: "Active C".into(), code: None },
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
+        is_project_manager: false,
         task_assignments: vec![],
     };
     app.assignments = vec![inactive_b, active_a, active_c];

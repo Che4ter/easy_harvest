@@ -126,6 +126,8 @@ pub struct ProjectAssignment {
     pub project: ProjectRef,
     pub client: ClientRef,
     pub is_active: bool,
+    #[serde(default)]
+    pub is_project_manager: bool,
     pub task_assignments: Vec<ProjectTaskAssignment>,
 }
 
@@ -143,9 +145,73 @@ pub struct ProjectAssignmentsResponse {
     pub total_pages: i64,
 }
 
+/// One row of `GET /reports/project_budget`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProjectBudgetReport {
+    pub project_id: i64,
+    pub project_name: String,
+    pub client_name: Option<String>,
+    pub budget_is_monthly: bool,
+    pub budget_by: String,
+    pub is_active: bool,
+    pub budget: Option<f64>,
+    pub budget_spent: f64,
+    pub budget_remaining: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProjectBudgetReportResponse {
+    pub results: Vec<ProjectBudgetReport>,
+    pub total_pages: i64,
+}
+
+/// A task assignment of a project with its optional per-task budget
+/// (`GET /projects/{id}/task_assignments`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TaskAssignmentBudget {
+    pub task: TaskRef,
+    pub budget: Option<f64>,
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TaskAssignmentsResponse {
+    pub task_assignments: Vec<TaskAssignmentBudget>,
+    pub total_pages: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const REPORT: &str = r#"{"results":[{"project_id":1,"project_name":"Alpha","client_id":2,"client_name":"X","budget_is_monthly":false,"budget_by":"project","is_active":true,"budget":400.0,"budget_spent":312.0,"budget_remaining":88.0}],"per_page":2000,"total_pages":1}"#;
+
+    #[test]
+    fn budget_report_deserializes() {
+        let r: ProjectBudgetReportResponse = serde_json::from_str(REPORT).unwrap();
+        assert_eq!(r.results[0].budget, Some(400.0));
+        assert_eq!(r.results[0].budget_by, "project");
+    }
+
+    #[test]
+    fn budget_report_null_budget() {
+        let json = REPORT
+            .replace("\"budget\":400.0", "\"budget\":null")
+            .replace("\"budget_remaining\":88.0", "\"budget_remaining\":null");
+        let r: ProjectBudgetReportResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(r.results[0].budget, None);
+        assert_eq!(r.results[0].budget_remaining, None);
+    }
+
+    #[test]
+    fn assignment_manager_flag_defaults_false() {
+        let base = r#"{"id":1,"project":{"id":1,"name":"P","code":null},"client":{"id":1,"name":"C"},"is_active":true,"task_assignments":[]"#;
+        let without: ProjectAssignment = serde_json::from_str(&format!("{base}}}")).unwrap();
+        assert!(!without.is_project_manager);
+        let with: ProjectAssignment =
+            serde_json::from_str(&format!("{base},\"is_project_manager\":true}}")).unwrap();
+        assert!(with.is_project_manager);
+    }
 
     fn create(hours: Option<f64>) -> serde_json::Value {
         serde_json::to_value(CreateTimeEntry {

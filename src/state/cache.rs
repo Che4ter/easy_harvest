@@ -113,6 +113,7 @@ mod tests {
             project: ProjectRef { id: 10, name: "Alpha".into(), code: None },
             client: ClientRef { id: 20, name: "Acme".into() },
             is_active: true,
+            is_project_manager: false,
             task_assignments: vec![ProjectTaskAssignment {
                 id: 100,
                 task: TaskRef { id: 200, name: "Dev".into() },

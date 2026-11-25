@@ -686,3 +686,10 @@ async fn test_create_without_hours_starts_timer() {
     client.stop_timer(created.id).await.expect("stop_timer failed");
     client.delete_time_entry(created.id).await.expect("delete failed");
 }
+
+#[tokio::test]
+#[ignore]
+async fn test_project_budget_report() {
+    let reports = client().list_all_project_budget_reports().await;
+    assert!(reports.is_ok(), "list_all_project_budget_reports failed: {:?}", reports.err());
+}

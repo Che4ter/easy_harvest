@@ -125,6 +125,7 @@ impl HarvestClient {
         from: Option<&str>,
         to: Option<&str>,
         approval_status: Option<&str>,
+        project_id: Option<i64>,
         page: Option<i64>,
     ) -> Result<TimeEntriesResponse, HarvestError> {
         let resp = self
@@ -132,6 +133,9 @@ impl HarvestClient {
                 let mut req = self.request(reqwest::Method::GET, "/time_entries");
                 if let Some(uid) = user_id {
                     req = req.query(&[("user_id", &uid.to_string())]);
+                }
+                if let Some(pid) = project_id {
+                    req = req.query(&[("project_id", &pid.to_string())]);
                 }
                 if let Some(from) = from {
                     req = req.query(&[("from", from)]);
@@ -163,7 +167,23 @@ impl HarvestClient {
         to: &str,
     ) -> Result<Vec<TimeEntry>, HarvestError> {
         paginate_all(|page| async move {
-            let resp = self.list_time_entries(user_id, Some(from), Some(to), None, Some(page)).await?;
+            let resp = self.list_time_entries(user_id, Some(from), Some(to), None, None, Some(page)).await?;
+            Ok((resp.time_entries, resp.total_pages))
+        })
+        .await
+    }
+
+    /// Fetch every time entry (of all users) booked on `project_id`,
+    /// optionally starting at `from` (`YYYY-MM-DD`). Handles pagination.
+    pub async fn list_all_project_time_entries(
+        &self,
+        project_id: i64,
+        from: Option<&str>,
+    ) -> Result<Vec<TimeEntry>, HarvestError> {
+        paginate_all(|page| async move {
+            let resp = self
+                .list_time_entries(None, from, None, None, Some(project_id), Some(page))
+                .await?;
             Ok((resp.time_entries, resp.total_pages))
         })
         .await
@@ -178,7 +198,7 @@ impl HarvestClient {
     ) -> Result<Vec<TimeEntry>, HarvestError> {
         paginate_all(|page| async move {
             let resp = self
-                .list_time_entries(Some(user_id), None, Some(to), Some("unsubmitted"), Some(page))
+                .list_time_entries(Some(user_id), None, Some(to), Some("unsubmitted"), None, Some(page))
                 .await?;
             Ok((resp.time_entries, resp.total_pages))
         })
@@ -277,6 +297,69 @@ impl HarvestClient {
         paginate_all(|page| async move {
             let resp = self.list_my_project_assignments(Some(page)).await?;
             Ok((resp.project_assignments, resp.total_pages))
+        })
+        .await
+    }
+
+    // --- Budgets ---
+
+    async fn list_project_budget_reports(
+        &self,
+        page: Option<i64>,
+    ) -> Result<ProjectBudgetReportResponse, HarvestError> {
+        let resp = self
+            .send_with_retry(|| {
+                let mut req = self
+                    .request(reqwest::Method::GET, "/reports/project_budget")
+                    .query(&[("is_active", "true")]);
+                if let Some(page) = page {
+                    req = req.query(&[("page", &page.to_string())]);
+                }
+                req
+            })
+            .await?;
+        Ok(resp.json().await?)
+    }
+
+    /// Fetch the budget report of all active projects, handling pagination.
+    pub async fn list_all_project_budget_reports(
+        &self,
+    ) -> Result<Vec<ProjectBudgetReport>, HarvestError> {
+        paginate_all(|page| async move {
+            let resp = self.list_project_budget_reports(Some(page)).await?;
+            Ok((resp.results, resp.total_pages))
+        })
+        .await
+    }
+
+    async fn list_project_task_assignments(
+        &self,
+        project_id: i64,
+        page: Option<i64>,
+    ) -> Result<TaskAssignmentsResponse, HarvestError> {
+        let resp = self
+            .send_with_retry(|| {
+                let mut req = self.request(
+                    reqwest::Method::GET,
+                    &format!("/projects/{project_id}/task_assignments"),
+                );
+                if let Some(page) = page {
+                    req = req.query(&[("page", &page.to_string())]);
+                }
+                req
+            })
+            .await?;
+        Ok(resp.json().await?)
+    }
+
+    /// Fetch all task assignments (with budgets) of a project, handling pagination.
+    pub async fn list_all_project_task_assignments(
+        &self,
+        project_id: i64,
+    ) -> Result<Vec<TaskAssignmentBudget>, HarvestError> {
+        paginate_all(|page| async move {
+            let resp = self.list_project_task_assignments(project_id, Some(page)).await?;
+            Ok((resp.task_assignments, resp.total_pages))
         })
         .await
     }
