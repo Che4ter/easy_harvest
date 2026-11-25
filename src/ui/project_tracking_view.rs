@@ -1,12 +1,14 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{
+    button, column, container, mouse_area, row, scrollable, stack, text, text_input, Space,
+};
 use iced::{Alignment, Color, Element, Length};
 use crate::state::project_budgets::BudgetScope;
 use crate::state::project_tracking_layout::CardKey;
 
 use crate::app::{
-    managed_card_title, visible_and_hidden_cards, BudgetSummary, EasyHarvest, ManagedBudget,
-    Message, PersonSplit, ProjectTrackingMsg, SplitState, ACCENT, DANGER, FONT_MEDIUM,
-    FONT_REGULAR, FONT_SEMIBOLD, SUCCESS, TEXT_MUTED, TEXT_PRIMARY,
+    managed_card_title, visible_and_hidden_cards, BudgetSummary, DragState, EasyHarvest,
+    ManagedBudget, Message, PersonSplit, ProjectTrackingMsg, SplitState, ACCENT, BACKGROUND, DANGER,
+    FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD, SUCCESS, TEXT_MUTED, TEXT_PRIMARY,
 };
 use super::{
     badge, caption, card_style, delete_chip_btn, dropdown_container_style, field_label,
@@ -74,9 +76,7 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         };
         content = content.push(text(message).font(FONT_REGULAR).size(13).color(TEXT_MUTED));
     } else if !visible.is_empty() {
-        let cards: Vec<Element<Message>> =
-            visible.iter().filter_map(|&key| card(state, key)).collect();
-        content = content.push(column(cards).spacing(LIST_ROW_SPACING));
+        content = content.push(card_list(state, &visible));
     }
 
     if !hidden.is_empty() {
@@ -118,30 +118,113 @@ fn card_title(state: &EasyHarvest, key: CardKey) -> Option<String> {
     }
 }
 
-fn card(state: &EasyHarvest, key: CardKey) -> Option<Element<'_, Message>> {
+/// Visible cards with drag-and-drop reordering. Each card is preceded by an
+/// insertion slot (always present, so the layout doesn't shift mid-drag); a
+/// taller trailing slot is added while dragging to drop after the last card.
+fn card_list<'a>(state: &'a EasyHarvest, visible: &[CardKey]) -> Element<'a, Message> {
+    let drag = state.project_tracking.drag;
+    let msg = |m| Message::ProjectTracking(m);
+    let mut list = column![].width(Length::Fill);
+    for (i, &key) in visible.iter().enumerate() {
+        let Some(card) = card(state, key, i) else { continue };
+        let card: Element<Message> = if drag.is_some_and(|d| d.from == i) {
+            stack![card, dimmed_overlay()].into()
+        } else {
+            card
+        };
+        let mut target = mouse_area(card);
+        if drag.is_some() {
+            target = target.on_enter(msg(ProjectTrackingMsg::DragOver(i)));
+        }
+        list = list
+            .push(insertion_slot(drag, i, LIST_ROW_SPACING, Alignment::Center))
+            .push(target);
+    }
+    // The list is always wrapped (only the handlers change) so starting a
+    // drag doesn't rebuild the widget tree and reset hover states.
+    if drag.is_none() {
+        return mouse_area(list).into();
+    }
+    let len = visible.len();
+    list = list.push(
+        mouse_area(insertion_slot(drag, len, 24.0, Alignment::Start))
+            .on_enter(msg(ProjectTrackingMsg::DragOver(len))),
+    );
+    // Leaving the list clears the slot, so a release outside cancels.
+    mouse_area(list)
+        .on_exit(msg(ProjectTrackingMsg::DragLeave))
+        .into()
+}
+
+/// Gap of `height` in which a 2 px accent line (placed per `align`) marks the
+/// drop position when `slot` is the drag's current insertion slot.
+fn insertion_slot(
+    drag: Option<DragState>,
+    slot: usize,
+    height: f32,
+    align: Alignment,
+) -> Element<'static, Message> {
+    let active = drag.is_some_and(|d| d.over == Some(slot));
+    let line = container(Space::new().width(Length::Fill).height(2))
+        .width(Length::Fill)
+        .style(move |_| container::Style {
+            background: active.then_some(iced::Background::Color(ACCENT)),
+            ..Default::default()
+        });
+    container(line)
+        .width(Length::Fill)
+        .height(height)
+        .align_y(align)
+        .into()
+}
+
+/// Translucent layer over the dragged card, so it reads as lifted out.
+fn dimmed_overlay() -> Element<'static, Message> {
+    container(Space::new().width(Length::Fill).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_| container::Style {
+            background: Some(iced::Background::Color(BACKGROUND.scale_alpha(0.6))),
+            border: iced::Border { radius: 10.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .into()
+}
+
+fn card(state: &EasyHarvest, key: CardKey, index: usize) -> Option<Element<'_, Message>> {
     let pt = &state.project_tracking;
     match key {
         CardKey::Harvest(pid) => {
             let m = pt.managed.iter().find(|m| m.project_id == pid)?;
-            Some(managed_card(m, pt.managed_splits.get(&pid)))
+            Some(managed_card(m, pt.managed_splits.get(&pid), index))
         }
         CardKey::Manual(id) => {
             if let Some(summary) = pt.summaries.iter().find(|s| s.budget.id == id) {
-                return Some(budget_card(summary));
+                return Some(budget_card(summary, index));
             }
             let b = pt.budgets.budgets_for(pt.year).iter().find(|b| b.id == id)?;
-            Some(empty_budget_card(b.id, &b.name, b.budget_hours, state.loading))
+            Some(empty_budget_card(b.id, &b.name, b.budget_hours, state.loading, index))
         }
     }
 }
 
-/// Shared card container. Task 8 adds the drag handle here, at the left.
-fn card_shell(body: iced::widget::Column<'_, Message>) -> Element<'_, Message> {
-    container(body)
-        .style(card_style)
-        .padding([12, 14])
-        .width(Length::Fill)
-        .into()
+/// Shared card container with the drag handle at the left. Only the handle
+/// starts a drag, so the card's buttons keep working normally.
+fn card_shell(body: iced::widget::Column<'_, Message>, index: usize) -> Element<'_, Message> {
+    let handle = mouse_area(
+        container(text("⠿").size(16).color(TEXT_MUTED)).padding([2, 2]),
+    )
+    .on_press(Message::ProjectTracking(ProjectTrackingMsg::DragStart(index)))
+    .interaction(iced::mouse::Interaction::Grab);
+    container(
+        row![handle, body.width(Length::Fill)]
+            .spacing(10)
+            .align_y(Alignment::Center),
+    )
+    .style(card_style)
+    .padding([12, 14])
+    .width(Length::Fill)
+    .into()
 }
 
 fn usage_color(pct: f64) -> Color {
@@ -218,7 +301,11 @@ fn split_legend<'a>(segments: &[(&'a crate::app::Segment, Color)], approximate: 
     iced::widget::Row::with_children(items).spacing(12).wrap().into()
 }
 
-fn managed_card<'a>(m: &'a ManagedBudget, split: Option<&'a SplitState>) -> Element<'a, Message> {
+fn managed_card<'a>(
+    m: &'a ManagedBudget,
+    split: Option<&'a SplitState>,
+    index: usize,
+) -> Element<'a, Message> {
     let key = CardKey::Harvest(m.project_id);
     let pct = if m.budget_hours > 0.0 { m.spent_hours / m.budget_hours } else { 0.0 };
     let bar_color = usage_color(pct);
@@ -277,7 +364,7 @@ fn managed_card<'a>(m: &'a ManagedBudget, split: Option<&'a SplitState>) -> Elem
         .align_y(Alignment::Center),
     );
 
-    card_shell(body)
+    card_shell(body, index)
 }
 
 fn manual_header(id: u64, name: &str) -> iced::widget::Row<'_, Message> {
@@ -298,7 +385,7 @@ fn manual_header(id: u64, name: &str) -> iced::widget::Row<'_, Message> {
     .align_y(Alignment::Center)
 }
 
-fn budget_card(summary: &BudgetSummary) -> Element<'_, Message> {
+fn budget_card(summary: &BudgetSummary, index: usize) -> Element<'_, Message> {
     let pct = summary.pct_used;
     let bar_color = usage_color(pct);
 
@@ -339,10 +426,16 @@ fn budget_card(summary: &BudgetSummary) -> Element<'_, Message> {
         .align_y(Alignment::Center),
     );
 
-    card_shell(body)
+    card_shell(body, index)
 }
 
-fn empty_budget_card(id: u64, name: &str, budget_hours: f64, loading: bool) -> Element<'_, Message> {
+fn empty_budget_card(
+    id: u64,
+    name: &str,
+    budget_hours: f64,
+    loading: bool,
+    index: usize,
+) -> Element<'_, Message> {
     let status = if loading { "loading…" } else { "press Refresh to load data" };
     card_shell(
         column![
@@ -353,6 +446,7 @@ fn empty_budget_card(id: u64, name: &str, budget_hours: f64, loading: bool) -> E
                 .color(TEXT_MUTED),
         ]
         .spacing(6),
+        index,
     )
 }
 

@@ -25,6 +25,13 @@ impl EasyHarvest {
             _ => None,
         });
 
+        // Card drag on the Projects page: release drops, Escape cancels.
+        let drag = if self.project_tracking.drag.is_some() {
+            iced::event::listen_with(drag_event)
+        } else {
+            Subscription::none()
+        };
+
         #[cfg(not(target_os = "macos"))]
         {
             let close = window::close_requests().map(Message::WindowCloseRequested);
@@ -32,13 +39,28 @@ impl EasyHarvest {
                 tick,
                 tab,
                 rescaled,
+                drag,
                 close,
                 crate::tray::tray_subscription(self.tray_phase.clone(), self.tray_update_notify.clone()),
             ])
         }
         #[cfg(target_os = "macos")]
         {
-            Subscription::batch([tick, tab, rescaled])
+            Subscription::batch([tick, tab, rescaled, drag])
         }
     }
+}
+
+fn drag_event(event: iced::Event, _status: iced::event::Status, _window: window::Id) -> Option<Message> {
+    let msg = match event {
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+            ProjectTrackingMsg::DragDrop
+        }
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            ..
+        }) => ProjectTrackingMsg::DragCancel,
+        _ => return None,
+    };
+    Some(Message::ProjectTracking(msg))
 }

@@ -64,6 +64,14 @@ pub enum SplitState {
     Failed,
 }
 
+/// An in-progress card drag. Indices refer to the visible ordered card list;
+/// `over` is the insertion slot (0..=len), `None` while outside the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DragState {
+    pub from: usize,
+    pub over: Option<usize>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ProjectTrackingPageState {
     pub budgets: ProjectBudgetStore,
@@ -80,6 +88,7 @@ pub struct ProjectTrackingPageState {
     pub managed_gen: u64,
     pub layout: ProjectTrackingLayout,
     pub show_hidden: bool,
+    pub drag: Option<DragState>,
 }
 
 impl ProjectTrackingPageState {
@@ -98,12 +107,10 @@ pub(crate) fn managed_card_title(m: &super::ManagedBudget) -> String {
     format!("{} · {}", m.project_name, m.client_name)
 }
 
-/// Card keys of the Projects page in display order, split into visible and
-/// hidden: managed projects plus manual budgets of the selected year.
-/// Unordered cards are sorted by their title.
-pub(crate) fn visible_and_hidden_cards(
-    state: &ProjectTrackingPageState,
-) -> (Vec<CardKey>, Vec<CardKey>) {
+/// Card keys of the Projects page in display order (visible and hidden):
+/// managed projects plus manual budgets of the selected year. Unordered cards
+/// are sorted by their title.
+fn ordered_cards(state: &ProjectTrackingPageState) -> Vec<CardKey> {
     let present: Vec<(CardKey, String)> = state
         .managed
         .iter()
@@ -116,11 +123,37 @@ pub(crate) fn visible_and_hidden_cards(
                 .map(|b| (CardKey::Manual(b.id), b.name.clone())),
         )
         .collect();
-    state
-        .layout
-        .ordered(&present)
+    state.layout.ordered(&present)
+}
+
+/// Card keys of the Projects page in display order, split into visible and
+/// hidden.
+pub(crate) fn visible_and_hidden_cards(
+    state: &ProjectTrackingPageState,
+) -> (Vec<CardKey>, Vec<CardKey>) {
+    ordered_cards(state)
         .into_iter()
         .partition(|k| !state.layout.is_hidden(*k))
+}
+
+/// Maps a move of visible card `from` to visible insertion slot `to`
+/// (0..=visible.len()) onto `(from, to)` indices of `full`, the visible and
+/// hidden cards in display order. Slot `visible.len()` maps to right after
+/// the last visible card, so hidden cards keep their relative positions.
+pub(crate) fn full_list_move(
+    full: &[CardKey],
+    visible: &[CardKey],
+    from: usize,
+    to: usize,
+) -> Option<(usize, usize)> {
+    let position = |key: &CardKey| full.iter().position(|k| k == key);
+    let full_from = position(visible.get(from)?)?;
+    let full_to = if to == visible.len() {
+        position(visible.last()?)? + 1
+    } else {
+        position(visible.get(to)?)?
+    };
+    Some((full_from, full_to))
 }
 
 // ── Messages ────────────────────────────────────────────────────────────────
@@ -141,6 +174,15 @@ pub enum ProjectTrackingMsg {
     HideCard(CardKey),
     UnhideCard(CardKey),
     ToggleShowHidden,
+    /// Drag of the visible card at this index started (handle pressed).
+    DragStart(usize),
+    /// Cursor entered insertion slot (0..=visible len) during a drag.
+    DragOver(usize),
+    /// Cursor left the card list during a drag.
+    DragLeave,
+    /// Mouse released: move the card to the current slot, if any.
+    DragDrop,
+    DragCancel,
     ShowForm,
     HideForm,
     EditBudget(u64),
@@ -271,6 +313,38 @@ impl EasyHarvest {
 
             ProjectTrackingMsg::ToggleShowHidden => {
                 self.project_tracking.show_hidden = !self.project_tracking.show_hidden;
+                Task::none()
+            }
+
+            ProjectTrackingMsg::DragStart(from) => {
+                self.project_tracking.drag = Some(DragState { from, over: None });
+                Task::none()
+            }
+
+            ProjectTrackingMsg::DragOver(slot) => {
+                if let Some(drag) = &mut self.project_tracking.drag {
+                    drag.over = Some(slot);
+                }
+                Task::none()
+            }
+
+            ProjectTrackingMsg::DragLeave => {
+                if let Some(drag) = &mut self.project_tracking.drag {
+                    drag.over = None;
+                }
+                Task::none()
+            }
+
+            ProjectTrackingMsg::DragDrop => {
+                // Released outside the list (`over == None`) acts as a cancel.
+                if let Some(DragState { from, over: Some(to) }) = self.project_tracking.drag.take() {
+                    self.move_visible_card(from, to);
+                }
+                Task::none()
+            }
+
+            ProjectTrackingMsg::DragCancel => {
+                self.project_tracking.drag = None;
                 Task::none()
             }
 
@@ -452,6 +526,29 @@ impl EasyHarvest {
             .chain(pt.budgets.years.values().flatten().map(|b| CardKey::Manual(b.id)))
             .collect();
         pt.layout.prune(&present);
+    }
+
+    /// Moves visible card `from` to visible insertion slot `to` and saves the
+    /// layout. Hidden cards keep their relative positions.
+    fn move_visible_card(&mut self, from: usize, to: usize) {
+        let full = ordered_cards(&self.project_tracking);
+        let visible: Vec<CardKey> = full
+            .iter()
+            .copied()
+            .filter(|k| !self.project_tracking.layout.is_hidden(*k))
+            .collect();
+        let Some((full_from, full_to)) = full_list_move(&full, &visible, from, to) else {
+            return;
+        };
+        if full_to == full_from || full_to == full_from + 1 {
+            return; // Dropped in place: nothing to save.
+        }
+        let previous = self.project_tracking.layout.clone();
+        self.project_tracking.layout.move_card(&full, full_from, full_to);
+        if let Err(e) = self.project_tracking.layout.save(&self.settings.data_dir) {
+            self.project_tracking.layout = previous;
+            self.error_banner = Some(format!("Failed to save project layout: {e}"));
+        }
     }
 
     fn set_card_hidden(&mut self, key: CardKey, hidden: bool) {

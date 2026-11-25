@@ -3103,3 +3103,88 @@ fn year_switch_keeps_managed_data() {
     assert_eq!(app.project_tracking.managed.len(), 1);
     assert_eq!(app.project_tracking.managed_gen, before);
 }
+
+/// App with three managed cards, displayed as Project 1, Project 2, Project 3.
+fn drag_test_app(dir: &std::path::Path) -> EasyHarvest {
+    let mut app = EasyHarvest::test_instance(dir);
+    app.project_tracking.managed = vec![managed_budget(1), managed_budget(2), managed_budget(3)];
+    app
+}
+
+#[test]
+fn drag_drop_reorders_and_saves() {
+    use crate::state::project_tracking_layout::{CardKey, ProjectTrackingLayout};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = drag_test_app(dir.path());
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(2));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
+
+    let expected = vec![CardKey::Harvest(3), CardKey::Harvest(1), CardKey::Harvest(2)];
+    assert!(app.project_tracking.drag.is_none());
+    assert_eq!(visible_and_hidden_cards(&app.project_tracking).0, expected);
+    assert_eq!(ProjectTrackingLayout::load(dir.path()).order, expected);
+    assert_eq!(app.error_banner, None);
+}
+
+#[test]
+fn drag_cancel_no_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = drag_test_app(dir.path());
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(3));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragCancel);
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
+
+    assert!(app.project_tracking.drag.is_none());
+    assert!(app.project_tracking.layout.order.is_empty());
+    assert!(!dir.path().join("project_tracking_layout.json").exists());
+}
+
+#[test]
+fn drag_drop_without_over_is_cancel() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = drag_test_app(dir.path());
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(3));
+    // Cursor left the list before release.
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragLeave);
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
+
+    assert!(app.project_tracking.drag.is_none());
+    assert!(app.project_tracking.layout.order.is_empty());
+    assert!(!dir.path().join("project_tracking_layout.json").exists());
+}
+
+#[test]
+fn drag_drop_preserves_hidden_positions() {
+    use super::project_tracking::full_list_move;
+    use crate::state::project_tracking_layout::CardKey::Harvest as H;
+
+    // Full order A, X(hidden), B, C, Y(hidden); visible A, B, C.
+    let full = [H(1), H(9), H(2), H(3), H(8)];
+    let visible = [H(1), H(2), H(3)];
+    assert_eq!(full_list_move(&full, &visible, 2, 0), Some((3, 0)));
+    // Slot == visible.len(): right after the last visible card, before Y.
+    assert_eq!(full_list_move(&full, &visible, 0, 3), Some((0, 4)));
+    assert_eq!(full_list_move(&full, &visible, 3, 0), None);
+    assert_eq!(full_list_move(&full, &visible, 0, 4), None);
+
+    // Through the app: hide Project 2, move Project 3 to the top.
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = drag_test_app(dir.path());
+    app.project_tracking.layout.set_hidden(H(2), true);
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(1));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
+
+    assert_eq!(app.project_tracking.layout.order, vec![H(3), H(1), H(2)]);
+    let (visible, hidden) = visible_and_hidden_cards(&app.project_tracking);
+    assert_eq!(visible, vec![H(3), H(1)]);
+    assert_eq!(hidden, vec![H(2)]);
+}
