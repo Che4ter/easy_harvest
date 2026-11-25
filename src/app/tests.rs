@@ -1,5 +1,6 @@
 use super::*;
 use super::tasks::{build_vacation_entries, compute_budget_summaries, dedup_entries_by_id};
+use super::project_tracking::SplitState;
 use crate::harvest::models::{ClientRef, ProjectRef, TaskRef, TimeEntry, UserRef};
 use crate::state::settings::YearCarryover;
 use crate::stats::{HolidayStats, PeriodStats, YearBalance};
@@ -2896,4 +2897,209 @@ fn dedup_entries_by_id_removes_duplicates_for_team_scope() {
     };
     let s = compute_budget_summaries(&[budget], &deduped, Some(1));
     assert!((s[0].used_hours - 5.0).abs() < 1e-9);
+}
+
+// ── Managed (Harvest) project budgets ───────────────────────────────────────
+
+fn managed_budget(project_id: i64) -> ManagedBudget {
+    ManagedBudget {
+        project_id,
+        project_name: format!("Project {project_id}"),
+        client_name: "Client".into(),
+        budget_hours: 100.0,
+        spent_hours: 40.0,
+        remaining_hours: 60.0,
+        is_monthly: false,
+        budget_by: "project".into(),
+    }
+}
+
+#[test]
+fn managed_loaded_403_shows_manual_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.project_tracking.managed_loading = true;
+    let r#gen = app.project_tracking.managed_gen;
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::ManagedLoaded(r#gen, Ok(None)));
+
+    assert!(app.project_tracking.managed.is_empty());
+    assert!(app.project_tracking.managed_splits.is_empty());
+    assert!(!app.project_tracking.managed_loading);
+    assert_eq!(app.error_banner, None);
+}
+
+#[test]
+fn managed_loaded_computes_budgets_and_marks_splits_loading() {
+    use crate::harvest::models::{ProjectAssignment, ProjectBudgetReport};
+    use crate::state::project_tracking_layout::CardKey;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    // A stale managed key gets pruned; a manual key of another year survives.
+    app.project_tracking.layout.order = vec![CardKey::Harvest(999), CardKey::Manual(7)];
+    app.project_tracking.budgets.budgets_for_mut(2020).push(
+        crate::state::project_budgets::ProjectBudget {
+            id: 7,
+            name: "Old".into(),
+            budget_hours: 10.0,
+            project_ids: vec![1],
+            task_ids: vec![],
+            scope: Default::default(),
+        },
+    );
+    let assignment = ProjectAssignment {
+        id: 1,
+        project: ProjectRef { id: 42, name: "Managed".into(), code: None },
+        client: ClientRef { id: 1, name: "Client".into() },
+        is_active: true,
+        is_project_manager: true,
+        task_assignments: vec![],
+    };
+    let report = ProjectBudgetReport {
+        project_id: 42,
+        project_name: "Managed".into(),
+        client_name: Some("Client".into()),
+        budget_is_monthly: false,
+        budget_by: "project".into(),
+        is_active: true,
+        budget: Some(100.0),
+        budget_spent: 30.0,
+        budget_remaining: Some(70.0),
+    };
+    app.project_tracking.managed_loading = true;
+    let r#gen = app.project_tracking.managed_gen;
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::ManagedLoaded(
+        r#gen,
+        Ok(Some((vec![assignment], vec![report]))),
+    ));
+
+    assert!(!app.project_tracking.managed_loading);
+    assert_eq!(app.project_tracking.managed.len(), 1);
+    assert_eq!(app.project_tracking.managed[0].project_id, 42);
+    assert!(matches!(
+        app.project_tracking.managed_splits.get(&42),
+        Some(SplitState::Loading)
+    ));
+    assert_eq!(app.project_tracking.layout.order, vec![CardKey::Manual(7)]);
+}
+
+#[test]
+fn stale_managed_loaded_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.project_tracking.managed_gen = 2;
+    app.project_tracking.managed_loading = true;
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::ManagedLoaded(1, Err("boom".into())));
+
+    assert!(app.project_tracking.managed_loading);
+    assert_eq!(app.error_banner, None);
+}
+
+#[test]
+fn managed_loaded_error_sets_banner() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.project_tracking.managed_loading = true;
+    let r#gen = app.project_tracking.managed_gen;
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::ManagedLoaded(r#gen, Err("boom".into())));
+
+    assert!(!app.project_tracking.managed_loading);
+    assert_eq!(app.error_banner.as_deref(), Some("boom"));
+}
+
+#[test]
+fn stale_split_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.project_tracking.managed_gen = 2;
+    app.project_tracking.managed = vec![managed_budget(42)];
+    app.project_tracking.managed_splits.insert(42, SplitState::Loading);
+    let split = PersonSplit { segments: vec![], approximate: false };
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::SplitLoaded(1, 42, Ok(split)));
+
+    assert!(matches!(
+        app.project_tracking.managed_splits.get(&42),
+        Some(SplitState::Loading)
+    ));
+}
+
+#[test]
+fn split_loaded_sets_ready() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.project_tracking.managed = vec![managed_budget(42)];
+    app.project_tracking.managed_splits.insert(42, SplitState::Loading);
+    let r#gen = app.project_tracking.managed_gen;
+    let split = PersonSplit { segments: vec![], approximate: true };
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::SplitLoaded(r#gen, 42, Ok(split.clone())));
+
+    assert!(matches!(
+        app.project_tracking.managed_splits.get(&42),
+        Some(SplitState::Ready(s)) if *s == split
+    ));
+}
+
+#[test]
+fn failed_split_keeps_totals() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.project_tracking.managed = vec![managed_budget(42)];
+    app.project_tracking.managed_splits.insert(42, SplitState::Loading);
+    let r#gen = app.project_tracking.managed_gen;
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::SplitLoaded(r#gen, 42, Err("nope".into())));
+
+    assert!(matches!(
+        app.project_tracking.managed_splits.get(&42),
+        Some(SplitState::Failed)
+    ));
+    assert!(app.project_tracking.managed.iter().any(|m| m.project_id == 42));
+    assert_eq!(app.error_banner, None);
+}
+
+#[test]
+fn hide_card_persists() {
+    use crate::state::project_tracking_layout::{CardKey, ProjectTrackingLayout};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::HideCard(CardKey::Harvest(1)));
+
+    assert!(app.project_tracking.layout.is_hidden(CardKey::Harvest(1)));
+    assert!(dir.path().join("project_tracking_layout.json").exists());
+    assert!(ProjectTrackingLayout::load(dir.path()).is_hidden(CardKey::Harvest(1)));
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::UnhideCard(CardKey::Harvest(1)));
+
+    assert!(!app.project_tracking.layout.is_hidden(CardKey::Harvest(1)));
+    assert!(!ProjectTrackingLayout::load(dir.path()).is_hidden(CardKey::Harvest(1)));
+}
+
+#[test]
+fn toggle_show_hidden_flips_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    assert!(!app.project_tracking.show_hidden);
+    let _ = app.update_project_tracking(ProjectTrackingMsg::ToggleShowHidden);
+    assert!(app.project_tracking.show_hidden);
+}
+
+#[test]
+fn year_switch_keeps_managed_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.project_tracking.managed = vec![managed_budget(42)];
+    let before = app.project_tracking.managed_gen;
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::YearPrev);
+
+    assert_eq!(app.project_tracking.managed.len(), 1);
+    assert_eq!(app.project_tracking.managed_gen, before);
 }

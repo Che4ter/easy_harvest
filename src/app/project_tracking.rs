@@ -1,5 +1,9 @@
 use super::*;
+use std::collections::HashMap;
+
+use crate::harvest::models::ProjectBudgetReport;
 use crate::state::project_budgets::{BudgetScope, ProjectBudget, ProjectBudgetStore};
+use crate::state::project_tracking_layout::{CardKey, ProjectTrackingLayout};
 
 // ── Page state ──────────────────────────────────────────────────────────────
 
@@ -52,6 +56,14 @@ impl BudgetForm {
     }
 }
 
+/// Per-person split of a managed budget card, loaded separately from totals.
+#[derive(Debug, Clone)]
+pub enum SplitState {
+    Loading,
+    Ready(super::PersonSplit),
+    Failed,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ProjectTrackingPageState {
     pub budgets: ProjectBudgetStore,
@@ -59,6 +71,15 @@ pub struct ProjectTrackingPageState {
     pub entries: Vec<TimeEntry>,
     pub summaries: Vec<BudgetSummary>,
     pub form: Option<BudgetForm>,
+    /// Harvest hour budgets of projects the user manages (year-independent).
+    pub managed: Vec<super::ManagedBudget>,
+    pub managed_splits: HashMap<i64, SplitState>,
+    pub managed_loading: bool,
+    /// Generation for managed loads; separate from `project_tracking_gen` so
+    /// year switches (which reload manual entries) don't drop managed results.
+    pub managed_gen: u64,
+    pub layout: ProjectTrackingLayout,
+    pub show_hidden: bool,
 }
 
 impl ProjectTrackingPageState {
@@ -66,6 +87,7 @@ impl ProjectTrackingPageState {
         Self {
             budgets: ProjectBudgetStore::load(data_dir),
             year,
+            layout: ProjectTrackingLayout::load(data_dir),
             ..Default::default()
         }
     }
@@ -73,12 +95,22 @@ impl ProjectTrackingPageState {
 
 // ── Messages ────────────────────────────────────────────────────────────────
 
+/// Raw inputs for managed budgets: the user's project assignments and the
+/// project budget report.
+pub type ManagedData = (Vec<ProjectAssignment>, Vec<ProjectBudgetReport>);
+
 #[derive(Debug, Clone)]
 pub enum ProjectTrackingMsg {
     Refresh,
     YearPrev,
     YearNext,
     EntriesLoaded(u64, Result<Vec<TimeEntry>, String>),
+    /// `Ok(None)`: the user may not read budget reports (HTTP 403).
+    ManagedLoaded(u64, Result<Option<ManagedData>, String>),
+    SplitLoaded(u64, i64, Result<super::PersonSplit, String>),
+    HideCard(CardKey),
+    UnhideCard(CardKey),
+    ToggleShowHidden,
     ShowForm,
     HideForm,
     EditBudget(u64),
@@ -137,14 +169,15 @@ impl EasyHarvest {
                 self.project_tracking.entries.shrink_to_fit();
                 self.project_tracking.summaries.clear();
                 let year = self.project_tracking.year;
-                if self.client.is_some() && !self.project_tracking.budgets.budgets_for(year).is_empty() {
+                let manual = if self.client.is_some() && !self.project_tracking.budgets.budgets_for(year).is_empty() {
                     self.loading = true;
                     self.project_tracking_gen += 1;
                     self.load_project_tracking_task()
                 } else {
                     self.recompute_project_tracking_summaries();
                     Task::none()
-                }
+                };
+                Task::batch([manual, self.start_managed_budgets_load()])
             }
 
             ProjectTrackingMsg::EntriesLoaded(r#gen, result) => {
@@ -157,6 +190,57 @@ impl EasyHarvest {
                     }
                     Err(e) => self.error_banner = Some(e),
                 }
+                Task::none()
+            }
+
+            ProjectTrackingMsg::ManagedLoaded(r#gen, result) => {
+                if r#gen != self.project_tracking.managed_gen { return Task::none(); }
+                self.project_tracking.managed_loading = false;
+                match result {
+                    Ok(Some((assignments, reports))) => {
+                        let managed = super::budget_split::managed_hour_budgets(&assignments, &reports);
+                        self.project_tracking.managed_splits = managed
+                            .iter()
+                            .map(|m| (m.project_id, SplitState::Loading))
+                            .collect();
+                        self.project_tracking.managed = managed;
+                        self.prune_project_tracking_layout();
+                        self.load_managed_splits_task()
+                    }
+                    Ok(None) => {
+                        self.project_tracking.managed.clear();
+                        self.project_tracking.managed_splits.clear();
+                        Task::none()
+                    }
+                    Err(e) => {
+                        self.error_banner = Some(e);
+                        Task::none()
+                    }
+                }
+            }
+
+            ProjectTrackingMsg::SplitLoaded(r#gen, project_id, result) => {
+                if r#gen != self.project_tracking.managed_gen { return Task::none(); }
+                let state = match result {
+                    Ok(split) => SplitState::Ready(split),
+                    Err(_) => SplitState::Failed,
+                };
+                self.project_tracking.managed_splits.insert(project_id, state);
+                Task::none()
+            }
+
+            ProjectTrackingMsg::HideCard(key) => {
+                self.set_card_hidden(key, true);
+                Task::none()
+            }
+
+            ProjectTrackingMsg::UnhideCard(key) => {
+                self.set_card_hidden(key, false);
+                Task::none()
+            }
+
+            ProjectTrackingMsg::ToggleShowHidden => {
+                self.project_tracking.show_hidden = !self.project_tracking.show_hidden;
                 Task::none()
             }
 
@@ -311,6 +395,41 @@ impl EasyHarvest {
                     Task::none()
                 }
             }
+        }
+    }
+}
+
+impl EasyHarvest {
+    /// Bumps the managed generation and starts loading managed budgets when a
+    /// client is configured. Manual budgets are irrelevant to this load.
+    pub(super) fn start_managed_budgets_load(&mut self) -> Task<Message> {
+        if self.client.is_none() {
+            return Task::none();
+        }
+        self.project_tracking.managed_gen += 1;
+        self.project_tracking.managed_loading = true;
+        self.load_managed_budgets_task()
+    }
+
+    /// Drops layout keys of cards that no longer exist: managed projects plus
+    /// manual budgets of every year (so other years keep their order/hidden).
+    fn prune_project_tracking_layout(&mut self) {
+        let pt = &mut self.project_tracking;
+        let present: Vec<CardKey> = pt
+            .managed
+            .iter()
+            .map(|m| CardKey::Harvest(m.project_id))
+            .chain(pt.budgets.years.values().flatten().map(|b| CardKey::Manual(b.id)))
+            .collect();
+        pt.layout.prune(&present);
+    }
+
+    fn set_card_hidden(&mut self, key: CardKey, hidden: bool) {
+        let previous = self.project_tracking.layout.clone();
+        self.project_tracking.layout.set_hidden(key, hidden);
+        if let Err(e) = self.project_tracking.layout.save(&self.settings.data_dir) {
+            self.project_tracking.layout = previous;
+            self.error_banner = Some(format!("Failed to save project layout: {e}"));
         }
     }
 }

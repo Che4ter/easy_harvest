@@ -300,7 +300,7 @@ impl EasyHarvest {
             }
             Page::ProjectTracking => {
                 let year = self.project_tracking.year;
-                if self.project_tracking.entries.is_empty()
+                let manual = if self.project_tracking.entries.is_empty()
                     && self.client.is_some()
                     && !self.project_tracking.budgets.budgets_for(year).is_empty()
                 {
@@ -309,7 +309,15 @@ impl EasyHarvest {
                     self.load_project_tracking_task()
                 } else {
                     Task::none()
-                }
+                };
+                let managed = if self.project_tracking.managed.is_empty()
+                    && !self.project_tracking.managed_loading
+                {
+                    self.start_managed_budgets_load()
+                } else {
+                    Task::none()
+                };
+                Task::batch([manual, managed])
             }
             Page::Team => {
                 // Team page tracks loading per-member (`TeamMemberStats::loading`),

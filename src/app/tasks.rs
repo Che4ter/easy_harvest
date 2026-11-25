@@ -710,6 +710,83 @@ impl EasyHarvest {
         )
     }
 
+    /// Fetches the user's project assignments and the budget report. A 403 on
+    /// either (no permission for reports) yields `Ok(None)`.
+    pub(super) fn load_managed_budgets_task(&self) -> Task<Message> {
+        use super::project_tracking::ProjectTrackingMsg;
+        use crate::harvest::client::HarvestError;
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let r#gen = self.project_tracking.managed_gen;
+        Task::perform(
+            async move {
+                let fetched = async {
+                    let assignments = client.list_all_my_project_assignments().await?;
+                    let reports = client.list_all_project_budget_reports().await?;
+                    Ok::<_, HarvestError>((assignments, reports))
+                }
+                .await;
+                match fetched {
+                    Ok(data) => Ok(Some(data)),
+                    Err(HarvestError::Api { status: 403, .. }) => Ok(None),
+                    Err(e) => Err(e.to_string()),
+                }
+            },
+            move |result| Message::ProjectTracking(ProjectTrackingMsg::ManagedLoaded(r#gen, result)),
+        )
+    }
+
+    /// One task per managed budget computing its per-person split; at most
+    /// three run their Harvest requests concurrently.
+    pub(super) fn load_managed_splits_task(&self) -> Task<Message> {
+        use super::project_tracking::ProjectTrackingMsg;
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let r#gen = self.project_tracking.managed_gen;
+        let user_id = self.harvest_user_id;
+        let month_start = Local::now().date_naive().with_day(1).unwrap_or_else(|| Local::now().date_naive());
+        let month_start = month_start.format("%Y-%m-%d").to_string();
+        let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(3));
+        Task::batch(self.project_tracking.managed.iter().map(|m| {
+            let client = client.clone();
+            let permits = permits.clone();
+            let project_id = m.project_id;
+            let by_task = m.budget_by == "task";
+            let from = m.is_monthly.then(|| month_start.clone());
+            let spent = m.spent_hours;
+            Task::perform(
+                async move {
+                    let _permit = permits.acquire().await.map_err(|e| e.to_string())?;
+                    let counted_tasks: Option<std::collections::HashSet<i64>> = if by_task {
+                        let tas = client
+                            .list_all_project_task_assignments(project_id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        Some(tas.into_iter().filter(|t| t.budget.is_some()).map(|t| t.task.id).collect())
+                    } else {
+                        None
+                    };
+                    let entries = client
+                        .list_all_project_time_entries(project_id, from.as_deref())
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    Ok(super::budget_split::compute_person_split(
+                        &entries,
+                        counted_tasks.as_ref(),
+                        Some(spent),
+                        user_id,
+                        4,
+                    ))
+                },
+                move |result| {
+                    Message::ProjectTracking(ProjectTrackingMsg::SplitLoaded(r#gen, project_id, result))
+                },
+            )
+        }))
+    }
+
     pub(super) fn recompute_project_tracking_summaries(&mut self) {
         let year = self.project_tracking.year;
         let entries = &self.project_tracking.entries;
