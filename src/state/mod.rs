@@ -5,6 +5,7 @@ pub mod io;
 pub mod overtime_adjustments;
 pub mod persistence;
 pub mod project_budgets;
+pub mod project_tracking_layout;
 pub mod settings;
 pub mod team;
 pub mod templates;
