@@ -181,6 +181,16 @@ pub fn plain_btn_style(_: &iced::Theme, _: button::Status) -> button::Style {
     }
 }
 
+/// Track behind every progress bar: raised surface plus a faint outline so an
+/// empty (0 %) bar is still visible on card backgrounds.
+fn bar_track_style(radius: iced::border::Radius) -> container::Style {
+    container::Style {
+        background: Some(iced::Background::Color(SURFACE_RAISED)),
+        border: Border { color: with_alpha(TEXT_MUTED, 0.35), width: 1.0, radius },
+        ..Default::default()
+    }
+}
+
 /// A proportional progress bar built from two `FillPortion` containers.
 ///
 /// `pct` — fill fraction in `[0.0, 1.0]`.
@@ -224,11 +234,7 @@ pub fn progress_bar(
     };
 
     container(row![fill, empty].spacing(0))
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(SURFACE_RAISED)),
-            border: Border { radius, ..Default::default() },
-            ..Default::default()
-        })
+        .style(move |_| bar_track_style(radius))
         .width(Length::Fill)
         .height(height as f32)
         .into()
@@ -295,11 +301,7 @@ pub fn stacked_progress_bar(
     }
 
     container(iced::widget::Row::with_children(cells).spacing(0))
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(SURFACE_RAISED)),
-            border: Border { radius: r.into(), ..Default::default() },
-            ..Default::default()
-        })
+        .style(move |_| bar_track_style(r.into()))
         .width(Length::Fill)
         .height(height as f32)
         .into()

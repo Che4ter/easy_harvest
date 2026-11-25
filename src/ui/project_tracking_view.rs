@@ -93,7 +93,9 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
         }
     }
 
-    scrollable(content.padding(PAGE_PADDING))
+    // Extra right padding keeps cards clear of the vertical scrollbar; bottom
+    // padding stops the last card sitting flush against the window edge.
+    scrollable(content.padding(iced::Padding { right: 20.0, bottom: 16.0, ..PAGE_PADDING }))
         .height(Length::Fill)
         .into()
 }
@@ -309,24 +311,21 @@ fn managed_card<'a>(
     let pct = if m.budget_hours > 0.0 { m.spent_hours / m.budget_hours } else { 0.0 };
     let bar_color = usage_color(pct);
 
-    let mut header = row![text(managed_card_title(m))
+    // The title takes the remaining width and wraps, so long project names
+    // never push the Hide button out of the card. Spent / budget lives in the
+    // footer row for the same reason.
+    let mut title = column![text(managed_card_title(m))
         .font(FONT_SEMIBOLD)
         .size(14)
         .color(TEXT_PRIMARY)]
-    .spacing(6)
-    .align_y(Alignment::Center);
+    .spacing(2)
+    .width(Length::Fill);
     if m.is_monthly {
-        header = header.push(caption("this month"));
+        title = title.push(caption("this month"));
     }
-    header = header
-        .push(Space::new().width(Length::Fill))
-        .push(
-            text(format!("{} / {}", format_hhmm(m.spent_hours), format_hhmm(m.budget_hours)))
-                .font(FONT_REGULAR)
-                .size(13)
-                .color(TEXT_MUTED),
-        )
-        .push(hide_btn(key));
+    let header = row![title, hide_btn(key)]
+        .spacing(6)
+        .align_y(Alignment::Center);
 
     let plain_bar = || progress_bar(pct.min(1.0) as f32, bar_color, 6);
     let mut body = column![header].spacing(8);
@@ -355,11 +354,16 @@ fn managed_card<'a>(
         row![
             remaining_label(m.remaining_hours),
             Space::new().width(Length::Fill),
+            text(format!("{} / {}", format_hhmm(m.spent_hours), format_hhmm(m.budget_hours)))
+                .font(FONT_REGULAR)
+                .size(13)
+                .color(TEXT_MUTED),
             text(format!("{:.0}%", pct * 100.0))
                 .font(FONT_SEMIBOLD)
                 .size(13)
                 .color(bar_color),
         ]
+        .spacing(8)
         .align_y(Alignment::Center),
     );
 
@@ -368,12 +372,20 @@ fn managed_card<'a>(
 
 fn manual_header(id: u64, name: &str) -> iced::widget::Row<'_, Message> {
     row![
-        text(name.to_owned())
-            .font(FONT_SEMIBOLD)
-            .size(14)
-            .color(TEXT_PRIMARY),
-        badge("Manual"),
-        Space::new().width(Length::Fill),
+        // Fill width so a long name wraps instead of pushing the buttons out.
+        container(
+            row![
+                text(name.to_owned())
+                    .font(FONT_SEMIBOLD)
+                    .size(14)
+                    .color(TEXT_PRIMARY),
+                badge("Manual"),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .wrap(),
+        )
+        .width(Length::Fill),
         outline_btn_sm("Edit")
             .on_press(Message::ProjectTracking(ProjectTrackingMsg::EditBudget(id))),
         hide_btn(CardKey::Manual(id)),
