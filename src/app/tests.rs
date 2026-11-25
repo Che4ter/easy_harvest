@@ -1,5 +1,5 @@
 use super::*;
-use super::tasks::{build_vacation_entries, compute_budget_summaries};
+use super::tasks::{build_vacation_entries, compute_budget_summaries, dedup_entries_by_id};
 use crate::harvest::models::{ClientRef, ProjectRef, TaskRef, TimeEntry, UserRef};
 use crate::state::settings::YearCarryover;
 use crate::stats::{HolidayStats, PeriodStats, YearBalance};
@@ -2873,4 +2873,27 @@ fn budget_summary_team_scope_counts_members() {
     let me = compute_budget_summaries(&[budget], &entries, Some(1));
     assert!((me[0].used_hours - 5.0).abs() < 1e-9);
     assert_eq!(me[0].split.segments.len(), 1);
+}
+
+#[test]
+fn dedup_entries_by_id_removes_duplicates_for_team_scope() {
+    use crate::state::project_budgets::{BudgetScope, ProjectBudget};
+
+    // User 1 is also a team member, so their entry is fetched twice.
+    let entries = vec![
+        make_entry(1, 10, 1, 5.0, false),
+        make_entry(1, 10, 1, 5.0, false),
+    ];
+    let deduped = dedup_entries_by_id(entries);
+    assert_eq!(deduped.len(), 1);
+    let budget = ProjectBudget {
+        id: 1,
+        name: "Edu".into(),
+        budget_hours: 100.0,
+        project_ids: vec![10],
+        task_ids: vec![],
+        scope: BudgetScope::MeAndTeam,
+    };
+    let s = compute_budget_summaries(&[budget], &deduped, Some(1));
+    assert!((s[0].used_hours - 5.0).abs() < 1e-9);
 }

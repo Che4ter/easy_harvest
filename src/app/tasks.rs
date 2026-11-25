@@ -678,7 +678,12 @@ impl EasyHarvest {
                 .iter()
                 .any(|b| b.scope == BudgetScope::MeAndTeam)
         {
-            self.team_settings.members.iter().map(|m| m.harvest_user_id).collect()
+            self.team_settings
+                .members
+                .iter()
+                .map(|m| m.harvest_user_id)
+                .filter(|id| Some(*id) != user_id)
+                .collect()
         } else {
             Vec::new()
         };
@@ -695,7 +700,7 @@ impl EasyHarvest {
                         .map_err(|e| e.to_string())?;
                     all_entries.extend(theirs);
                 }
-                let filtered: Vec<_> = all_entries
+                let filtered: Vec<_> = dedup_entries_by_id(all_entries)
                     .into_iter()
                     .filter(|e| all_project_ids.contains(&e.project.id))
                     .collect();
@@ -724,6 +729,14 @@ impl EasyHarvest {
     pub(super) fn team_scope_active(&self) -> bool {
         self.settings.team_lead_mode && !self.team_settings.members.is_empty()
     }
+}
+
+/// Drops repeated entries (same Harvest entry id), keeping the first occurrence.
+pub(super) fn dedup_entries_by_id(
+    entries: Vec<crate::harvest::models::TimeEntry>,
+) -> Vec<crate::harvest::models::TimeEntry> {
+    let mut seen = std::collections::HashSet::new();
+    entries.into_iter().filter(|e| seen.insert(e.id)).collect()
 }
 
 // ── Budget summary computation (pure, testable) ────────────────────────────
