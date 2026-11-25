@@ -924,6 +924,7 @@ fn entry_form_view(state: &EasyHarvest) -> Element<'_, Message> {
                 project_label,
                 project_input,
                 suggestion_list,
+                budget_preview_view(state, form),
                 hours_label,
                 hours_input,
                 notes_label,
@@ -1091,3 +1092,62 @@ fn status_badge(label: &str, color: Color) -> Element<'static, Message> {
 }
 
 // end of day_view
+
+/// Remaining budget of the selected project under the picker, with a live
+/// warning once the typed hours would push it over.
+fn budget_preview_view<'a>(state: &'a EasyHarvest, form: &'a crate::app::EntryForm) -> Element<'a, Message> {
+    let Some((project_id, task_id)) = form.selected_project_key else {
+        return Space::new().into();
+    };
+    let typed = super::parse_hours(&form.hours_input).unwrap_or(0.0).max(0.0);
+    // Editing: the entry's current hours are already counted as used.
+    let delta = match form.original {
+        Some((pid, hours)) if pid == project_id => typed - hours,
+        _ => typed,
+    };
+    let Some(p) = crate::app::budget_preview(&state.project_tracking, project_id, task_id, delta) else {
+        return Space::new().into();
+    };
+    let left_now = p.budget_hours - p.used_hours;
+    let pct = if p.budget_hours > 0.0 { (p.used_hours / p.budget_hours).clamp(0.0, 1.0) } else { 0.0 };
+    let after_pct = if p.budget_hours > 0.0 {
+        ((p.used_hours + delta.max(0.0)) / p.budget_hours).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let bar_color = if p.remaining_after < 0.0 {
+        DANGER
+    } else if after_pct >= 0.8 {
+        ACCENT
+    } else {
+        SUCCESS
+    };
+    let left_label = if left_now >= 0.0 {
+        format!("{} left of {}", super::format_hhmm(left_now), super::format_hhmm(p.budget_hours))
+    } else {
+        format!("{} over {}", super::format_hhmm(-left_now), super::format_hhmm(p.budget_hours))
+    };
+    let mut col = column![
+        row![
+            text(p.title.clone()).font(FONT_REGULAR).size(12).color(TEXT_MUTED).width(Length::Fill),
+            text(left_label).font(FONT_MEDIUM).size(12).color(TEXT_MUTED),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        progress_bar_with_marker(pct as f32, bar_color, after_pct as f32, 4),
+    ]
+    .spacing(4);
+    if p.remaining_after < 0.0 && delta > 0.0 {
+        col = col.push(
+            text(format!(
+                "⚠ This puts {} over budget by {}",
+                p.title,
+                super::format_hhmm(-p.remaining_after)
+            ))
+            .font(FONT_MEDIUM)
+            .size(12)
+            .color(DANGER),
+        );
+    }
+    container(col).padding([4, 2]).into()
+}

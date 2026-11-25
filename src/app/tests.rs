@@ -3372,3 +3372,43 @@ fn rejected_add_member_keeps_project_tracking_entries() {
     assert_eq!(app.project_tracking.entries.len(), 1);
     assert_eq!(app.project_tracking.summaries.len(), 1);
 }
+
+// ── Entry-form budget preview ──────────────────────────────────────────────
+
+#[test]
+fn budget_preview_picks_tightest_budget_and_flags_overrun() {
+    use crate::app::budget_preview;
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    // Managed: 100 budget, 40 used → 60 left.
+    app.project_tracking.managed = vec![managed_budget(42)];
+    // Personal card on 7 not yet loaded → ignored.
+    let mut edu = managed_budget(7);
+    edu.personal = true;
+    app.project_tracking.managed.push(edu);
+
+    let p = budget_preview(&app.project_tracking, 42, 1, 70.0).unwrap();
+    assert_eq!(p.remaining_after, -10.0);
+    assert!(budget_preview(&app.project_tracking, 7, 1, 1.0).is_none());
+    assert!(budget_preview(&app.project_tracking, 99, 1, 1.0).is_none());
+}
+
+#[test]
+fn booking_moves_managed_totals() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    app.project_tracking.managed = vec![managed_budget(42)];
+    let mut e = make_entry(5, 42, 1, 2.5, true);
+    e.spent_date = "2026-11-25".into();
+
+    app.apply_booking_to_budgets(None, Some(&e));
+    let m = &app.project_tracking.managed[0];
+    assert_eq!(m.spent_hours, 42.5);
+    assert_eq!(m.remaining_hours, 57.5);
+
+    // Editing 2.5h → 1h moves it back by 1.5h.
+    let mut edited = e.clone();
+    edited.hours = 1.0;
+    app.apply_booking_to_budgets(Some(&e), Some(&edited));
+    assert_eq!(app.project_tracking.managed[0].spent_hours, 41.0);
+}

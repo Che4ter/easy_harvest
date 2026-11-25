@@ -511,7 +511,90 @@ impl EasyHarvest {
     }
 }
 
+/// What booking `delta` more hours on a project would do to its tightest
+/// budget. Shown under the project picker of the entry form.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BudgetPreview {
+    pub title: String,
+    pub budget_hours: f64,
+    pub used_hours: f64,
+    /// Remaining after the booking; negative = over budget.
+    pub remaining_after: f64,
+}
+
+/// Budgets covering `(project_id, task_id)`: managed/personal cards (personal
+/// only once their own hours have loaded) and manual budgets of the page's
+/// year. Returns the one with the least room left after adding `delta` hours.
+pub(crate) fn budget_preview(
+    state: &ProjectTrackingPageState,
+    project_id: i64,
+    task_id: i64,
+    delta: f64,
+) -> Option<BudgetPreview> {
+    let managed = state
+        .managed
+        .iter()
+        .filter(|m| m.project_id == project_id)
+        .filter(|m| {
+            !m.personal || matches!(state.managed_splits.get(&m.project_id), Some(SplitState::Ready(_)))
+        })
+        .map(|m| (managed_card_title(m), m.budget_hours, m.spent_hours));
+    let manual = state
+        .summaries
+        .iter()
+        .filter(|s| s.budget.project_ids.contains(&project_id))
+        .filter(|s| s.budget.task_ids.is_empty() || s.budget.task_ids.contains(&task_id))
+        .map(|s| (s.budget.name.clone(), s.budget.budget_hours, s.used_hours));
+    managed
+        .chain(manual)
+        .map(|(title, budget_hours, used_hours)| BudgetPreview {
+            title,
+            budget_hours,
+            used_hours,
+            remaining_after: budget_hours - used_hours - delta,
+        })
+        .min_by(|a, b| a.remaining_after.total_cmp(&b.remaining_after))
+}
+
 impl EasyHarvest {
+    /// Keeps Projects numbers current after a booking without a reload:
+    /// managed/personal totals move by `delta`, and the entry is merged into
+    /// the manual-budget entries (then summaries recompute). `old` is the
+    /// entry as it was before an update/delete, `new` the entry afterwards.
+    pub(super) fn apply_booking_to_budgets(&mut self, old: Option<&TimeEntry>, new: Option<&TimeEntry>) {
+        let mut deltas: Vec<(i64, f64)> = Vec::new();
+        if let Some(o) = old { deltas.push((o.project.id, -o.hours)); }
+        if let Some(n) = new { deltas.push((n.project.id, n.hours)); }
+        let pt = &mut self.project_tracking;
+        for (pid, delta) in deltas {
+            let ready = matches!(pt.managed_splits.get(&pid), Some(SplitState::Ready(_)));
+            for m in pt.managed.iter_mut().filter(|m| m.project_id == pid) {
+                // Task budgets only count some tasks; a personal card is only
+                // meaningful once its own hours are known.
+                if m.budget_by == "task" || (m.personal && !ready) { continue; }
+                m.spent_hours += delta;
+                m.remaining_hours -= delta;
+            }
+        }
+        // Manual budgets: only meaningful once their entries were loaded.
+        if pt.summaries.is_empty() { return; }
+        let year = pt.year.to_string();
+        let tracked: std::collections::HashSet<i64> = pt
+            .budgets
+            .budgets_for(pt.year)
+            .iter()
+            .flat_map(|b| b.project_ids.iter().copied())
+            .collect();
+        if let Some(o) = old { pt.entries.retain(|e| e.id != o.id); }
+        if let Some(n) = new
+            && n.spent_date.starts_with(&year)
+            && tracked.contains(&n.project.id)
+        {
+            pt.entries.push(n.clone());
+        }
+        self.recompute_project_tracking_summaries();
+    }
+
     /// Bumps the managed generation and starts loading managed budgets when a
     /// client is configured. Manual budgets are irrelevant to this load.
     pub(super) fn start_managed_budgets_load(&mut self) -> Task<Message> {

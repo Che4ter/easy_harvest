@@ -52,7 +52,7 @@ pub use settings::SettingsMsg;
 pub use settings::{SettingsFormState, ValidatedProfile, ValidatedCarryover, TemplateFormState};
 pub use project_tracking::ProjectTrackingMsg;
 pub use project_tracking::{ProjectTrackingPageState, BudgetSummary, BudgetForm, DragState, SplitState};
-pub(crate) use project_tracking::{managed_card_title, visible_and_hidden_cards};
+pub(crate) use project_tracking::{managed_card_title, visible_and_hidden_cards, budget_preview};
 pub use budget_split::{ManagedBudget, PersonSplit, Segment};
 pub use team::{TeamMsg, TeamMemberForm, TeamMemberStats, TeamPageState};
 

@@ -12,6 +12,9 @@ pub struct EntryForm {
     /// refresh — preferred over the index in Submit to avoid stale-index bugs.
     pub selected_project_key: Option<(i64, i64)>,
     pub hours_input: String,
+    /// `(project_id, hours)` of the entry being edited, so the budget preview
+    /// only counts the change in hours.
+    pub original: Option<(i64, f64)>,
     pub notes_input: String,
     pub error: Option<String>,
     /// True while an API create/update request is in flight — disables the
@@ -27,6 +30,7 @@ impl EntryForm {
             selected_project_idx: None,
             selected_project_key: None,
             hours_input: String::new(),
+            original: None,
             notes_input: String::new(),
             error: None,
             submitting: false,
@@ -52,6 +56,7 @@ impl EntryForm {
             selected_project_idx: idx,
             selected_project_key: key,
             hours_input: crate::ui::format_hhmm(entry.hours),
+            original: Some((entry.project.id, entry.hours)),
             notes_input: entry.notes.clone().unwrap_or_default(),
             error: None,
             submitting: false,
@@ -227,6 +232,7 @@ impl EasyHarvest {
                 if self.impersonating.is_some() { return Task::none(); }
                 match result {
                     Ok(entry) => {
+                        self.apply_booking_to_budgets(None, Some(&entry));
                         // Harvest stops any other timer when a new one starts.
                         if entry.is_running {
                             for e in &mut self.entries { e.is_running = false; }
@@ -253,6 +259,8 @@ impl EasyHarvest {
                 if self.impersonating.is_some() { return Task::none(); }
                 match result {
                     Ok(updated) => {
+                        let old = self.entries.iter().find(|e| e.id == updated.id).cloned();
+                        self.apply_booking_to_budgets(old.as_ref(), Some(&updated));
                         if let Some(pos) =
                             self.entries.iter().position(|e| e.id == updated.id)
                         {
@@ -304,7 +312,11 @@ impl EasyHarvest {
             EntryMsg::Deleted(result) => {
                 if self.impersonating.is_some() { return Task::none(); }
                 match result {
-                    Ok(id) => self.entries.retain(|e| e.id != id),
+                    Ok(id) => {
+                        let old = self.entries.iter().find(|e| e.id == id).cloned();
+                        self.apply_booking_to_budgets(old.as_ref(), None);
+                        self.entries.retain(|e| e.id != id);
+                    }
                     Err(e) => self.error_banner = Some(e),
                 }
                 Task::none()

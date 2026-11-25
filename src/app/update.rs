@@ -81,6 +81,15 @@ impl EasyHarvest {
                             self.start_all_team_carryover_syncs(),
                             self.update_unsubmitted(UnsubmittedMsg::Check { force: true }),
                             self.load_company_task(),
+                            // Background: budgets, so the entry form can show
+                            // what's left on the selected project.
+                            if self.project_tracking.managed.is_empty()
+                                && !self.project_tracking.managed_loading
+                            {
+                                self.start_managed_budgets_load()
+                            } else {
+                                Task::none()
+                            },
                         ])
                     }
                     Err(e) => {
