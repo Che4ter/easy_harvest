@@ -64,11 +64,12 @@ pub enum SplitState {
     Failed,
 }
 
-/// An in-progress card drag. Indices refer to the visible ordered card list;
-/// `over` is the insertion slot (0..=len), `None` while outside the list.
+/// An in-progress card drag. `from` is the dragged card (a key, so cards
+/// loading mid-drag can't shift it); `over` is the insertion slot in the
+/// visible ordered card list (0..=len), `None` while outside the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DragState {
-    pub from: usize,
+    pub from: CardKey,
     pub over: Option<usize>,
 }
 
@@ -174,8 +175,8 @@ pub enum ProjectTrackingMsg {
     HideCard(CardKey),
     UnhideCard(CardKey),
     ToggleShowHidden,
-    /// Drag of the visible card at this index started (handle pressed).
-    DragStart(usize),
+    /// Drag of this card started (handle pressed).
+    DragStart(CardKey),
     /// Cursor entered insertion slot (0..=visible len) during a drag.
     DragOver(usize),
     /// Cursor left the card list during a drag.
@@ -528,15 +529,19 @@ impl EasyHarvest {
         pt.layout.prune(&present);
     }
 
-    /// Moves visible card `from` to visible insertion slot `to` and saves the
-    /// layout. Hidden cards keep their relative positions.
-    fn move_visible_card(&mut self, from: usize, to: usize) {
+    /// Moves card `key` to visible insertion slot `to` and saves the layout.
+    /// Hidden cards keep their relative positions. Does nothing when the card
+    /// is no longer visible (e.g. its data reloaded mid-drag).
+    fn move_visible_card(&mut self, key: CardKey, to: usize) {
         let full = ordered_cards(&self.project_tracking);
         let visible: Vec<CardKey> = full
             .iter()
             .copied()
             .filter(|k| !self.project_tracking.layout.is_hidden(*k))
             .collect();
+        let Some(from) = visible.iter().position(|k| *k == key) else {
+            return;
+        };
         let Some((full_from, full_to)) = full_list_move(&full, &visible, from, to) else {
             return;
         };

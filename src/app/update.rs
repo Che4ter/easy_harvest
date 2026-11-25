@@ -354,6 +354,7 @@ impl EasyHarvest {
                 }
                 self.entry_form = None;
                 self.error_banner = None;
+                self.project_tracking.drag = None;
                 let task = if page == Page::Settings {
                     // Refresh profile inputs from current settings
                     self.settings_form.weekly_hours_input = self.settings.total_weekly_hours.to_string();

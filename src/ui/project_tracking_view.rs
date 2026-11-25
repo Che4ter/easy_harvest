@@ -126,8 +126,8 @@ fn card_list<'a>(state: &'a EasyHarvest, visible: &[CardKey]) -> Element<'a, Mes
     let msg = |m| Message::ProjectTracking(m);
     let mut list = column![].width(Length::Fill);
     for (i, &key) in visible.iter().enumerate() {
-        let Some(card) = card(state, key, i) else { continue };
-        let card: Element<Message> = if drag.is_some_and(|d| d.from == i) {
+        let Some(card) = card(state, key) else { continue };
+        let card: Element<Message> = if drag.is_some_and(|d| d.from == key) {
             stack![card, dimmed_overlay()].into()
         } else {
             card
@@ -191,30 +191,30 @@ fn dimmed_overlay() -> Element<'static, Message> {
         .into()
 }
 
-fn card(state: &EasyHarvest, key: CardKey, index: usize) -> Option<Element<'_, Message>> {
+fn card(state: &EasyHarvest, key: CardKey) -> Option<Element<'_, Message>> {
     let pt = &state.project_tracking;
     match key {
         CardKey::Harvest(pid) => {
             let m = pt.managed.iter().find(|m| m.project_id == pid)?;
-            Some(managed_card(m, pt.managed_splits.get(&pid), index))
+            Some(managed_card(m, pt.managed_splits.get(&pid)))
         }
         CardKey::Manual(id) => {
             if let Some(summary) = pt.summaries.iter().find(|s| s.budget.id == id) {
-                return Some(budget_card(summary, index));
+                return Some(budget_card(summary));
             }
             let b = pt.budgets.budgets_for(pt.year).iter().find(|b| b.id == id)?;
-            Some(empty_budget_card(b.id, &b.name, b.budget_hours, state.loading, index))
+            Some(empty_budget_card(b.id, &b.name, b.budget_hours, state.loading))
         }
     }
 }
 
 /// Shared card container with the drag handle at the left. Only the handle
 /// starts a drag, so the card's buttons keep working normally.
-fn card_shell(body: iced::widget::Column<'_, Message>, index: usize) -> Element<'_, Message> {
+fn card_shell(body: iced::widget::Column<'_, Message>, key: CardKey) -> Element<'_, Message> {
     let handle = mouse_area(
         container(text("⠿").size(16).color(TEXT_MUTED)).padding([2, 2]),
     )
-    .on_press(Message::ProjectTracking(ProjectTrackingMsg::DragStart(index)))
+    .on_press(Message::ProjectTracking(ProjectTrackingMsg::DragStart(key)))
     .interaction(iced::mouse::Interaction::Grab);
     container(
         row![handle, body.width(Length::Fill)]
@@ -304,7 +304,6 @@ fn split_legend<'a>(segments: &[(&'a crate::app::Segment, Color)], approximate: 
 fn managed_card<'a>(
     m: &'a ManagedBudget,
     split: Option<&'a SplitState>,
-    index: usize,
 ) -> Element<'a, Message> {
     let key = CardKey::Harvest(m.project_id);
     let pct = if m.budget_hours > 0.0 { m.spent_hours / m.budget_hours } else { 0.0 };
@@ -364,7 +363,7 @@ fn managed_card<'a>(
         .align_y(Alignment::Center),
     );
 
-    card_shell(body, index)
+    card_shell(body, key)
 }
 
 fn manual_header(id: u64, name: &str) -> iced::widget::Row<'_, Message> {
@@ -396,7 +395,7 @@ fn manual_split_segments(summary: &BudgetSummary) -> Vec<(&crate::app::Segment, 
     if segments.len() <= 1 { Vec::new() } else { segments }
 }
 
-fn budget_card(summary: &BudgetSummary, index: usize) -> Element<'_, Message> {
+fn budget_card(summary: &BudgetSummary) -> Element<'_, Message> {
     let pct = summary.pct_used;
     let bar_color = usage_color(pct);
 
@@ -437,7 +436,7 @@ fn budget_card(summary: &BudgetSummary, index: usize) -> Element<'_, Message> {
         .align_y(Alignment::Center),
     );
 
-    card_shell(body, index)
+    card_shell(body, CardKey::Manual(summary.budget.id))
 }
 
 fn empty_budget_card(
@@ -445,7 +444,6 @@ fn empty_budget_card(
     name: &str,
     budget_hours: f64,
     loading: bool,
-    index: usize,
 ) -> Element<'_, Message> {
     let status = if loading { "loading…" } else { "press Refresh to load data" };
     card_shell(
@@ -457,7 +455,7 @@ fn empty_budget_card(
                 .color(TEXT_MUTED),
         ]
         .spacing(6),
-        index,
+        CardKey::Manual(id),
     )
 }
 

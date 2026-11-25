@@ -3118,7 +3118,7 @@ fn drag_drop_reorders_and_saves() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = drag_test_app(dir.path());
 
-    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(2));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(CardKey::Harvest(3)));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(0));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
 
@@ -3131,10 +3131,12 @@ fn drag_drop_reorders_and_saves() {
 
 #[test]
 fn drag_cancel_no_change() {
+    use crate::state::project_tracking_layout::CardKey;
+
     let dir = tempfile::tempdir().unwrap();
     let mut app = drag_test_app(dir.path());
 
-    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(CardKey::Harvest(1)));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(3));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragCancel);
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
@@ -3146,10 +3148,12 @@ fn drag_cancel_no_change() {
 
 #[test]
 fn drag_drop_without_over_is_cancel() {
+    use crate::state::project_tracking_layout::CardKey;
+
     let dir = tempfile::tempdir().unwrap();
     let mut app = drag_test_app(dir.path());
 
-    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(CardKey::Harvest(1)));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(3));
     // Cursor left the list before release.
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragLeave);
@@ -3158,6 +3162,55 @@ fn drag_drop_without_over_is_cancel() {
     assert!(app.project_tracking.drag.is_none());
     assert!(app.project_tracking.layout.order.is_empty());
     assert!(!dir.path().join("project_tracking_layout.json").exists());
+}
+
+#[test]
+fn drag_moves_dragged_card_when_cards_load_mid_drag() {
+    use crate::state::project_tracking_layout::CardKey::Harvest as H;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = drag_test_app(dir.path());
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(H(3)));
+    // A reload adds "Project 0", which sorts first and shifts every index.
+    app.project_tracking.managed.insert(0, managed_budget(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
+
+    assert_eq!(
+        visible_and_hidden_cards(&app.project_tracking).0,
+        vec![H(3), H(0), H(1), H(2)]
+    );
+}
+
+#[test]
+fn drag_of_card_gone_mid_drag_is_cancelled() {
+    use crate::state::project_tracking_layout::CardKey::Harvest as H;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = drag_test_app(dir.path());
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(H(3)));
+    app.project_tracking.managed.retain(|m| m.project_id != 3);
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(0));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
+
+    assert!(app.project_tracking.drag.is_none());
+    assert!(app.project_tracking.layout.order.is_empty());
+    assert!(!dir.path().join("project_tracking_layout.json").exists());
+}
+
+#[test]
+fn page_change_clears_drag() {
+    use crate::state::project_tracking_layout::CardKey::Harvest as H;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = drag_test_app(dir.path());
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(H(1)));
+
+    let _ = app.update(Message::Nav(NavMsg::PageChanged(Page::Stats)));
+
+    assert!(app.project_tracking.drag.is_none());
 }
 
 #[test]
@@ -3179,7 +3232,7 @@ fn drag_drop_preserves_hidden_positions() {
     let mut app = drag_test_app(dir.path());
     app.project_tracking.layout.set_hidden(H(2), true);
 
-    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(1));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(H(3)));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(0));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
 
@@ -3198,7 +3251,7 @@ fn drag_drop_keeps_positions_of_unloaded_cards() {
     // M(7): manual budget of another year; H(99): managed card not loaded.
     app.project_tracking.layout.order = vec![M(7), H(1), H(99), H(2), H(3)];
 
-    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(2));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::DragStart(H(3)));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragOver(0));
     let _ = app.update_project_tracking(ProjectTrackingMsg::DragDrop);
 
