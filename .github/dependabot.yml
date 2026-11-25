@@ -7,9 +7,16 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Only propose releases that have been public for 3 days.
+    cooldown:
+      default-days: 3
 
   # Keep Cargo dependencies current.
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: monthly
+    # Only propose releases that have been public for 3 days (matches
+    # global-min-publish-age in .cargo/config.toml).
+    cooldown:
+      default-days: 3
