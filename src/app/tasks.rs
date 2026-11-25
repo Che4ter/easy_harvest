@@ -723,7 +723,12 @@ impl EasyHarvest {
             async move {
                 let fetched = async {
                     let assignments = client.list_all_my_project_assignments().await?;
-                    let reports = client.list_all_project_budget_reports().await?;
+                    // Users without manager rights get a 403 on the report; they
+                    // still see personal budgets from their own assignments.
+                    let reports = match client.list_all_project_budget_reports().await {
+                        Err(HarvestError::Api { status: 403, .. }) => Vec::new(),
+                        other => other?,
+                    };
                     Ok::<_, HarvestError>((assignments, reports))
                 }
                 .await;
@@ -756,6 +761,7 @@ impl EasyHarvest {
             let by_task = m.budget_by == "task";
             let from = m.is_monthly.then(|| month_start.clone());
             let spent = m.spent_hours;
+            let personal = m.personal;
             Task::perform(
                 async move {
                     let _permit = permits.acquire().await.map_err(|e| e.to_string())?;
@@ -768,10 +774,18 @@ impl EasyHarvest {
                     } else {
                         None
                     };
-                    let entries = client
+                    let mut entries = client
                         .list_all_project_time_entries(project_id, from.as_deref())
                         .await
                         .map_err(|e| e.to_string())?;
+                    if personal {
+                        // Only the user's own hours count against a personal
+                        // budget; there is no Harvest total to scale to.
+                        entries.retain(|e| user_id.is_none_or(|id| e.user.id == id));
+                        return Ok(super::budget_split::compute_person_split(
+                            &entries, None, None, user_id, 4,
+                        ));
+                    }
                     Ok(super::budget_split::compute_person_split(
                         &entries,
                         counted_tasks.as_ref(),

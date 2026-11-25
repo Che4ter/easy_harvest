@@ -268,7 +268,9 @@ impl EasyHarvest {
                 self.project_tracking.managed_loading = false;
                 match result {
                     Ok(Some((assignments, reports))) => {
-                        let managed = super::budget_split::managed_hour_budgets(&assignments, &reports);
+                        let mut managed = super::budget_split::managed_hour_budgets(&assignments, &reports);
+                        let managed_ids: Vec<i64> = managed.iter().map(|m| m.project_id).collect();
+                        managed.extend(super::budget_split::personal_hour_budgets(&assignments, &managed_ids));
                         self.project_tracking.managed_splits = managed
                             .iter()
                             .map(|m| (m.project_id, SplitState::Loading))
@@ -291,6 +293,14 @@ impl EasyHarvest {
 
             ProjectTrackingMsg::SplitLoaded(r#gen, project_id, result) => {
                 if r#gen != self.managed_budgets_gen { return Task::none(); }
+                // Personal budgets get spent/remaining from the user's own hours.
+                if let (Ok(split), Some(m)) = (
+                    &result,
+                    self.project_tracking.managed.iter_mut().find(|m| m.project_id == project_id && m.personal),
+                ) {
+                    m.spent_hours = split.segments.iter().map(|s| s.hours).sum();
+                    m.remaining_hours = m.budget_hours - m.spent_hours;
+                }
                 let state = match result {
                     Ok(split) => SplitState::Ready(split),
                     Err(_) => SplitState::Failed,
@@ -577,6 +587,7 @@ mod tests {
             remaining_hours: 90.0,
             is_monthly: false,
             budget_by: "project".to_string(),
+            personal: false,
         }
     }
 

@@ -16,6 +16,10 @@ pub struct ManagedBudget {
     pub remaining_hours: f64,
     pub is_monthly: bool,
     pub budget_by: String,
+    /// A personal budget on the user's own assignment (not a managed
+    /// project): spent/remaining are the user's own hours, filled in once
+    /// their entries load.
+    pub personal: bool,
 }
 
 /// One bar segment; `user_id == None` is the "Others" bucket.
@@ -61,6 +65,32 @@ pub fn managed_hour_budgets(
                 remaining_hours: r.budget_remaining.unwrap_or(budget - r.budget_spent),
                 is_monthly: r.budget_is_monthly,
                 budget_by: r.budget_by.clone(),
+                personal: false,
+            })
+        })
+        .collect()
+}
+
+/// Personal budgets: active assignments the user does not manage that carry a
+/// positive `budget` of their own (e.g. a yearly education allowance).
+/// Projects in `exclude` (already shown as managed cards) are skipped. Spent
+/// starts at 0 and is filled in from the user's own entries.
+pub fn personal_hour_budgets(assignments: &[ProjectAssignment], exclude: &[i64]) -> Vec<ManagedBudget> {
+    assignments
+        .iter()
+        .filter(|a| a.is_active && !a.is_project_manager && !exclude.contains(&a.project.id))
+        .filter_map(|a| {
+            let budget = a.budget.filter(|b| b.is_finite() && *b > 0.0)?;
+            Some(ManagedBudget {
+                project_id: a.project.id,
+                project_name: a.project.name.clone(),
+                client_name: a.client.name.clone(),
+                budget_hours: budget,
+                spent_hours: 0.0,
+                remaining_hours: budget,
+                is_monthly: false,
+                budget_by: "person".into(),
+                personal: true,
             })
         })
         .collect()
@@ -151,6 +181,7 @@ mod tests {
             client: ClientRef { id: 1, name: "Fallback".into() },
             is_active: true,
             is_project_manager: manager,
+            budget: None,
             task_assignments: vec![],
         }
     }
@@ -219,6 +250,26 @@ mod tests {
     fn skips_null_budget() {
         let out = managed_hour_budgets(&[assignment(1, true)], &[report(1, "project", None)]);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn personal_budgets_from_own_assignment() {
+        let mut edu = assignment(7, false);
+        edu.budget = Some(56.0);
+        let mut managed = assignment(8, true);
+        managed.budget = Some(10.0);
+        let mut excluded = assignment(9, false);
+        excluded.budget = Some(5.0);
+        let mut inactive = assignment(10, false);
+        inactive.budget = Some(5.0);
+        inactive.is_active = false;
+        let no_budget = assignment(11, false);
+        let out = personal_hour_budgets(&[edu, managed, excluded, inactive, no_budget], &[9]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].project_id, 7);
+        assert_eq!(out[0].budget_hours, 56.0);
+        assert_eq!(out[0].remaining_hours, 56.0);
+        assert!(out[0].personal);
     }
 
     #[test]

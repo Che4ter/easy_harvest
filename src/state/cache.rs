@@ -114,6 +114,7 @@ mod tests {
             client: ClientRef { id: 20, name: "Acme".into() },
             is_active: true,
             is_project_manager: false,
+            budget: None,
             task_assignments: vec![ProjectTaskAssignment {
                 id: 100,
                 task: TaskRef { id: 200, name: "Dev".into() },

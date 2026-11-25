@@ -759,6 +759,7 @@ fn vacation_submit_prefers_non_billable_project() {
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
         is_project_manager: false,
+        budget: None,
         task_assignments: vec![ProjectTaskAssignment {
             id: 1,
             task: TaskRef { id: task_id, name: "Holiday".into() },
@@ -773,6 +774,7 @@ fn vacation_submit_prefers_non_billable_project() {
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
         is_project_manager: false,
+        budget: None,
         task_assignments: vec![ProjectTaskAssignment {
             id: 2,
             task: TaskRef { id: task_id, name: "Holiday".into() },
@@ -798,6 +800,7 @@ fn vacation_submit_prefers_non_billable_project() {
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
         is_project_manager: false,
+        budget: None,
         task_assignments: vec![ProjectTaskAssignment {
             id: 3,
             task: TaskRef { id: task_id, name: "Holiday".into() },
@@ -812,6 +815,7 @@ fn vacation_submit_prefers_non_billable_project() {
             client: ClientRef { id: 1, name: "Client".into() },
             is_active: true,
             is_project_manager: false,
+            budget: None,
             task_assignments: vec![ProjectTaskAssignment {
                 id: 4,
                 task: TaskRef { id: task_id, name: "Holiday".into() },
@@ -963,6 +967,7 @@ fn assignments_loaded_discards_stale_generation() {
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
         is_project_manager: false,
+        budget: None,
         task_assignments: vec![],
     };
     let _ = app.update_entries(EntryMsg::AssignmentsLoaded(1, Ok(vec![stale_assignment])));
@@ -1116,6 +1121,7 @@ fn project_tracking_project_selected_correct_with_inactive_interspersed() {
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: false,
         is_project_manager: false,
+        budget: None,
         task_assignments: vec![],
     };
     let active_a = ProjectAssignment {
@@ -1124,6 +1130,7 @@ fn project_tracking_project_selected_correct_with_inactive_interspersed() {
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
         is_project_manager: false,
+        budget: None,
         task_assignments: vec![],
     };
     let active_c = ProjectAssignment {
@@ -1132,6 +1139,7 @@ fn project_tracking_project_selected_correct_with_inactive_interspersed() {
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
         is_project_manager: false,
+        budget: None,
         task_assignments: vec![],
     };
     app.assignments = vec![inactive_b, active_a, active_c];
@@ -2911,6 +2919,7 @@ fn managed_budget(project_id: i64) -> ManagedBudget {
         remaining_hours: 60.0,
         is_monthly: false,
         budget_by: "project".into(),
+        personal: false,
     }
 }
 
@@ -2954,6 +2963,7 @@ fn managed_loaded_computes_budgets_and_marks_splits_loading() {
         client: ClientRef { id: 1, name: "Client".into() },
         is_active: true,
         is_project_manager: true,
+        budget: None,
         task_assignments: vec![],
     };
     let report = ProjectBudgetReport {
@@ -3079,6 +3089,34 @@ fn failed_split_keeps_totals() {
     ));
     assert!(app.project_tracking.managed.iter().any(|m| m.project_id == 42));
     assert_eq!(app.error_banner, None);
+}
+
+#[test]
+fn personal_split_sets_own_spent_and_remaining() {
+    use crate::app::{PersonSplit, Segment};
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EasyHarvest::test_instance(dir.path());
+    let mut edu = managed_budget(7);
+    edu.personal = true;
+    edu.budget_hours = 56.0;
+    edu.spent_hours = 0.0;
+    edu.remaining_hours = 56.0;
+    app.project_tracking.managed = vec![edu, managed_budget(42)];
+    let r#gen = app.managed_budgets_gen;
+    let split = PersonSplit {
+        segments: vec![Segment { user_id: Some(1), label: "You".into(), hours: 14.5 }],
+        approximate: false,
+    };
+
+    let _ = app.update_project_tracking(ProjectTrackingMsg::SplitLoaded(r#gen, 7, Ok(split.clone())));
+    let _ = app.update_project_tracking(ProjectTrackingMsg::SplitLoaded(r#gen, 42, Ok(split)));
+
+    let edu = app.project_tracking.managed.iter().find(|m| m.project_id == 7).unwrap();
+    assert_eq!(edu.spent_hours, 14.5);
+    assert_eq!(edu.remaining_hours, 41.5);
+    // Managed (non-personal) totals stay as Harvest reported them.
+    let managed = app.project_tracking.managed.iter().find(|m| m.project_id == 42).unwrap();
+    assert_eq!(managed.spent_hours, 40.0);
 }
 
 #[test]

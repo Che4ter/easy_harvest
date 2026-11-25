@@ -12,7 +12,7 @@ use crate::app::{
 };
 use super::{
     badge, caption, card_style, delete_chip_btn, dropdown_container_style, field_label,
-    format_hhmm, input_style, list_row_style, nav_arrow_btn, outline_btn_sm, primary_btn,
+    format_hhmm, input_style, nav_arrow_btn, outline_btn_sm, primary_btn,
     progress_bar, refresh_btn, section_heading, stacked_progress_bar, suggestion_btn_style,
     toggle_active_style, toggle_inactive_style, LIST_ROW_SPACING, OTHERS_COLOR, PAGE_PADDING,
     SECTION_GAP, SPLIT_PALETTE,
@@ -81,15 +81,19 @@ pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
 
     if !hidden.is_empty() {
         content = content.push(
-            outline_btn_sm_owned(format!("Hidden ({})", hidden.len()))
-                .on_press(Message::ProjectTracking(ProjectTrackingMsg::ToggleShowHidden)),
+            outline_btn_sm_owned(format!(
+                "{} Hidden ({})",
+                if pt.show_hidden { "▾" } else { "▸" },
+                hidden.len()
+            ))
+            .on_press(Message::ProjectTracking(ProjectTrackingMsg::ToggleShowHidden)),
         );
+        // Hidden cards collapse at the end; expanded they show in full (so old
+        // budgets can still be checked), with Unhide instead of Hide.
         if pt.show_hidden {
-            let rows: Vec<Element<Message>> = hidden
-                .iter()
-                .filter_map(|&key| card_title(state, key).map(|title| hidden_row(key, title)))
-                .collect();
-            content = content.push(column(rows).spacing(LIST_ROW_SPACING));
+            let cards: Vec<Element<Message>> =
+                hidden.iter().filter_map(|&key| card(state, key, true)).collect();
+            content = content.push(column(cards).spacing(LIST_ROW_SPACING));
         }
     }
 
@@ -107,19 +111,6 @@ fn outline_btn_sm_owned<'a>(label: String) -> button::Button<'a, Message> {
         .padding([8, 12])
 }
 
-fn card_title(state: &EasyHarvest, key: CardKey) -> Option<String> {
-    let pt = &state.project_tracking;
-    match key {
-        CardKey::Harvest(pid) => pt.managed.iter().find(|m| m.project_id == pid).map(managed_card_title),
-        CardKey::Manual(id) => pt
-            .budgets
-            .budgets_for(pt.year)
-            .iter()
-            .find(|b| b.id == id)
-            .map(|b| b.name.clone()),
-    }
-}
-
 /// Visible cards with drag-and-drop reordering. Each card is preceded by an
 /// insertion slot (always present, so the layout doesn't shift mid-drag); a
 /// taller trailing slot is added while dragging to drop after the last card.
@@ -128,7 +119,7 @@ fn card_list<'a>(state: &'a EasyHarvest, visible: &[CardKey]) -> Element<'a, Mes
     let msg = |m| Message::ProjectTracking(m);
     let mut list = column![].width(Length::Fill);
     for (i, &key) in visible.iter().enumerate() {
-        let Some(card) = card(state, key) else { continue };
+        let Some(card) = card(state, key, false) else { continue };
         let card: Element<Message> = if drag.is_some_and(|d| d.from == key) {
             stack![card, dimmed_overlay()].into()
         } else {
@@ -193,36 +184,45 @@ fn dimmed_overlay() -> Element<'static, Message> {
         .into()
 }
 
-fn card(state: &EasyHarvest, key: CardKey) -> Option<Element<'_, Message>> {
+fn card(state: &EasyHarvest, key: CardKey, hidden: bool) -> Option<Element<'_, Message>> {
     let pt = &state.project_tracking;
     match key {
         CardKey::Harvest(pid) => {
             let m = pt.managed.iter().find(|m| m.project_id == pid)?;
-            Some(managed_card(m, pt.managed_splits.get(&pid)))
+            Some(managed_card(m, pt.managed_splits.get(&pid), hidden))
         }
         CardKey::Manual(id) => {
             if let Some(summary) = pt.summaries.iter().find(|s| s.budget.id == id) {
-                return Some(budget_card(summary));
+                return Some(budget_card(summary, hidden));
             }
             let b = pt.budgets.budgets_for(pt.year).iter().find(|b| b.id == id)?;
-            Some(empty_budget_card(b.id, &b.name, b.budget_hours, state.loading))
+            Some(empty_budget_card(b.id, &b.name, b.budget_hours, state.loading, hidden))
         }
     }
 }
 
 /// Shared card container with the drag handle at the left. Only the handle
 /// starts a drag, so the card's buttons keep working normally.
-fn card_shell(body: iced::widget::Column<'_, Message>, key: CardKey) -> Element<'_, Message> {
-    let handle = mouse_area(
-        container(text("⠿").size(16).color(TEXT_MUTED)).padding([2, 2]),
-    )
-    .on_press(Message::ProjectTracking(ProjectTrackingMsg::DragStart(key)))
-    .interaction(iced::mouse::Interaction::Grab);
-    container(
+fn card_shell(
+    body: iced::widget::Column<'_, Message>,
+    key: CardKey,
+    hidden: bool,
+) -> Element<'_, Message> {
+    // Hidden cards can't be reordered, so they get no drag handle.
+    let content: Element<Message> = if hidden {
+        body.width(Length::Fill).into()
+    } else {
+        let handle = mouse_area(
+            container(text("⠿").size(16).color(TEXT_MUTED)).padding([2, 2]),
+        )
+        .on_press(Message::ProjectTracking(ProjectTrackingMsg::DragStart(key)))
+        .interaction(iced::mouse::Interaction::Grab);
         row![handle, body.width(Length::Fill)]
             .spacing(10)
-            .align_y(Alignment::Center),
-    )
+            .align_y(Alignment::Center)
+            .into()
+    };
+    container(content)
     .style(card_style)
     .padding([12, 14])
     .width(Length::Fill)
@@ -248,8 +248,13 @@ fn remaining_label(remaining_hours: f64) -> Element<'static, Message> {
     text(label).font(FONT_SEMIBOLD).size(13).color(color).into()
 }
 
-fn hide_btn<'a>(key: CardKey) -> button::Button<'a, Message> {
-    outline_btn_sm("Hide").on_press(Message::ProjectTracking(ProjectTrackingMsg::HideCard(key)))
+/// "Hide" on visible cards, "Unhide" on cards in the hidden list.
+fn visibility_btn<'a>(key: CardKey, hidden: bool) -> button::Button<'a, Message> {
+    if hidden {
+        outline_btn_sm("Unhide").on_press(Message::ProjectTracking(ProjectTrackingMsg::UnhideCard(key)))
+    } else {
+        outline_btn_sm("Hide").on_press(Message::ProjectTracking(ProjectTrackingMsg::HideCard(key)))
+    }
 }
 
 /// Segments with positive hours paired with their colour: named segments take
@@ -306,6 +311,7 @@ fn split_legend<'a>(segments: &[(&'a crate::app::Segment, Color)], approximate: 
 fn managed_card<'a>(
     m: &'a ManagedBudget,
     split: Option<&'a SplitState>,
+    hidden: bool,
 ) -> Element<'a, Message> {
     let key = CardKey::Harvest(m.project_id);
     let pct = if m.budget_hours > 0.0 { m.spent_hours / m.budget_hours } else { 0.0 };
@@ -314,22 +320,25 @@ fn managed_card<'a>(
     // The title takes the remaining width and wraps, so long project names
     // never push the Hide button out of the card. Spent / budget lives in the
     // footer row for the same reason.
-    let mut title = column![text(managed_card_title(m))
-        .font(FONT_SEMIBOLD)
-        .size(14)
-        .color(TEXT_PRIMARY)]
-    .spacing(2)
-    .width(Length::Fill);
+    let name = text(managed_card_title(m)).font(FONT_SEMIBOLD).size(14).color(TEXT_PRIMARY);
+    let name: Element<Message> = if m.personal {
+        row![name, badge("Personal")].spacing(6).align_y(Alignment::Center).wrap().into()
+    } else {
+        name.into()
+    };
+    let mut title = column![name].spacing(2).width(Length::Fill);
     if m.is_monthly {
         title = title.push(caption("this month"));
     }
-    let header = row![title, hide_btn(key)]
+    let header = row![title, visibility_btn(key, hidden)]
         .spacing(6)
         .align_y(Alignment::Center);
 
     let plain_bar = || progress_bar(pct.min(1.0) as f32, bar_color, 6);
     let mut body = column![header].spacing(8);
     match split {
+        // A personal budget only ever holds the user's own hours: plain bar.
+        Some(SplitState::Ready(_)) if m.personal => body = body.push(plain_bar()),
         Some(SplitState::Ready(split)) => {
             let segments = colored_segments(split);
             if segments.is_empty() {
@@ -367,10 +376,10 @@ fn managed_card<'a>(
         .align_y(Alignment::Center),
     );
 
-    card_shell(body, key)
+    card_shell(body, key, hidden)
 }
 
-fn manual_header(id: u64, name: &str) -> iced::widget::Row<'_, Message> {
+fn manual_header(id: u64, name: &str, hidden: bool) -> iced::widget::Row<'_, Message> {
     row![
         // Fill width so a long name wraps instead of pushing the buttons out.
         container(
@@ -388,7 +397,7 @@ fn manual_header(id: u64, name: &str) -> iced::widget::Row<'_, Message> {
         .width(Length::Fill),
         outline_btn_sm("Edit")
             .on_press(Message::ProjectTracking(ProjectTrackingMsg::EditBudget(id))),
-        hide_btn(CardKey::Manual(id)),
+        visibility_btn(CardKey::Manual(id), hidden),
         outline_btn_sm("Delete")
             .on_press(Message::ProjectTracking(ProjectTrackingMsg::DeleteBudget(id))),
     ]
@@ -407,7 +416,7 @@ fn manual_split_segments(summary: &BudgetSummary) -> Vec<(&crate::app::Segment, 
     if segments.len() <= 1 { Vec::new() } else { segments }
 }
 
-fn budget_card(summary: &BudgetSummary) -> Element<'_, Message> {
+fn budget_card(summary: &BudgetSummary, hidden: bool) -> Element<'_, Message> {
     let pct = summary.pct_used;
     let bar_color = usage_color(pct);
 
@@ -421,7 +430,7 @@ fn budget_card(summary: &BudgetSummary) -> Element<'_, Message> {
         )
     };
 
-    let mut body = column![manual_header(summary.budget.id, &summary.budget.name), bar].spacing(8);
+    let mut body = column![manual_header(summary.budget.id, &summary.budget.name, hidden), bar].spacing(8);
     if !segments.is_empty() {
         body = body.push(split_legend(&segments, summary.split.approximate));
     }
@@ -448,7 +457,7 @@ fn budget_card(summary: &BudgetSummary) -> Element<'_, Message> {
         .align_y(Alignment::Center),
     );
 
-    card_shell(body, CardKey::Manual(summary.budget.id))
+    card_shell(body, CardKey::Manual(summary.budget.id), hidden)
 }
 
 fn empty_budget_card(
@@ -456,11 +465,12 @@ fn empty_budget_card(
     name: &str,
     budget_hours: f64,
     loading: bool,
+    hidden: bool,
 ) -> Element<'_, Message> {
     let status = if loading { "loading…" } else { "press Refresh to load data" };
     card_shell(
         column![
-            manual_header(id, name),
+            manual_header(id, name, hidden),
             text(format!("Budget: {} — {status}", format_hhmm(budget_hours)))
                 .font(FONT_REGULAR)
                 .size(13)
@@ -468,28 +478,8 @@ fn empty_budget_card(
         ]
         .spacing(6),
         CardKey::Manual(id),
+        hidden,
     )
-}
-
-/// Compact row of a hidden card: title + "Unhide".
-fn hidden_row(key: CardKey, title: String) -> Element<'static, Message> {
-    container(
-        row![
-            text(title)
-                .font(FONT_REGULAR)
-                .size(13)
-                .color(TEXT_MUTED)
-                .width(Length::Fill),
-            outline_btn_sm("Unhide")
-                .on_press(Message::ProjectTracking(ProjectTrackingMsg::UnhideCard(key))),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center),
-    )
-    .style(list_row_style)
-    .padding([6, 12])
-    .width(Length::Fill)
-    .into()
 }
 
 fn budget_form<'a>(state: &'a EasyHarvest, form: &'a crate::app::BudgetForm) -> Element<'a, Message> {

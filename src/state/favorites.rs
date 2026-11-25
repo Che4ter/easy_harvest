@@ -188,6 +188,7 @@ mod tests {
                 client: ClientRef { id: 1, name: "Acme".into() },
                 is_active: true,
                 is_project_manager: false,
+                budget: None,
                 task_assignments: vec![
                     ProjectTaskAssignment {
                         id: 100,
@@ -209,6 +210,7 @@ mod tests {
                 client: ClientRef { id: 2, name: "Beta Corp".into() },
                 is_active: true,
                 is_project_manager: false,
+                budget: None,
                 task_assignments: vec![ProjectTaskAssignment {
                     id: 102,
                     task: TaskRef { id: 202, name: "Dev".into() },

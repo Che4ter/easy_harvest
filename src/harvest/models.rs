@@ -128,6 +128,10 @@ pub struct ProjectAssignment {
     pub is_active: bool,
     #[serde(default)]
     pub is_project_manager: bool,
+    /// Personal budget (hours) on this assignment, e.g. a yearly education
+    /// allowance; `None` when the project has no per-person budget.
+    #[serde(default)]
+    pub budget: Option<f64>,
     pub task_assignments: Vec<ProjectTaskAssignment>,
 }
 
