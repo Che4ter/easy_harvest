@@ -191,13 +191,14 @@ fn budget_summary_single_budget() {
         budget_hours: 100.0,
         project_ids: vec![10],
         task_ids: vec![],
+        scope: Default::default(),
     }];
     let entries = vec![
         make_entry(1, 10, 1, 5.0, false),
         make_entry(2, 10, 2, 3.0, false),
         make_entry(3, 20, 1, 10.0, false), // different project, should be ignored
     ];
-    let summaries = compute_budget_summaries(&budgets, &entries);
+    let summaries = compute_budget_summaries(&budgets, &entries, Some(1));
     assert_eq!(summaries.len(), 1);
     assert!((summaries[0].used_hours - 8.0).abs() < f64::EPSILON);
     assert!((summaries[0].remaining_hours - 92.0).abs() < f64::EPSILON);
@@ -213,9 +214,10 @@ fn budget_summary_no_matching_entries() {
         budget_hours: 50.0,
         project_ids: vec![99],
         task_ids: vec![],
+        scope: Default::default(),
     }];
     let entries = vec![make_entry(1, 10, 1, 5.0, false)];
-    let summaries = compute_budget_summaries(&budgets, &entries);
+    let summaries = compute_budget_summaries(&budgets, &entries, Some(1));
     assert_eq!(summaries.len(), 1);
     assert!((summaries[0].used_hours - 0.0).abs() < f64::EPSILON);
     assert!((summaries[0].remaining_hours - 50.0).abs() < f64::EPSILON);
@@ -231,12 +233,13 @@ fn budget_summary_task_id_filtering() {
         budget_hours: 100.0,
         project_ids: vec![10],
         task_ids: vec![1], // only task 1
+        scope: Default::default(),
     }];
     let entries = vec![
         make_entry(1, 10, 1, 5.0, false), // matches
         make_entry(2, 10, 2, 8.0, false), // wrong task, excluded
     ];
-    let summaries = compute_budget_summaries(&budgets, &entries);
+    let summaries = compute_budget_summaries(&budgets, &entries, Some(1));
     assert_eq!(summaries.len(), 1);
     assert!((summaries[0].used_hours - 5.0).abs() < f64::EPSILON);
 }
@@ -248,18 +251,18 @@ fn budget_summary_multiple_budgets() {
     let budgets = vec![
         ProjectBudget {
             id: 1, name: "A".into(), budget_hours: 100.0,
-            project_ids: vec![10], task_ids: vec![],
+            project_ids: vec![10], task_ids: vec![],  scope: Default::default(),
         },
         ProjectBudget {
             id: 2, name: "B".into(), budget_hours: 50.0,
-            project_ids: vec![20], task_ids: vec![],
+            project_ids: vec![20], task_ids: vec![],  scope: Default::default(),
         },
     ];
     let entries = vec![
         make_entry(1, 10, 1, 10.0, false),
         make_entry(2, 20, 1, 25.0, false),
     ];
-    let summaries = compute_budget_summaries(&budgets, &entries);
+    let summaries = compute_budget_summaries(&budgets, &entries, Some(1));
     assert_eq!(summaries.len(), 2);
     assert!((summaries[0].used_hours - 10.0).abs() < f64::EPSILON);
     assert!((summaries[1].used_hours - 25.0).abs() < f64::EPSILON);
@@ -279,6 +282,7 @@ fn budget_summary_running_timer_uses_hours_field() {
         name: "Test Project".into(),
         project_ids: vec![10],
         task_ids: vec![],
+        scope: Default::default(),
         budget_hours: 100.0,
     };
 
@@ -286,7 +290,7 @@ fn budget_summary_running_timer_uses_hours_field() {
     running_entry.is_running = true;
     running_entry.hours_without_timer = Some(3.0); // timer has added 0.5h so far
 
-    let summaries = compute_budget_summaries(&[budget], &[running_entry]);
+    let summaries = compute_budget_summaries(&[budget], &[running_entry], Some(1));
 
     assert_eq!(summaries.len(), 1);
     // e.hours (3.5) is used, not hours_without_timer (3.0)
@@ -2844,4 +2848,29 @@ fn wizard_profile_continue_saves_web_address() {
     let _ = app.update_settings(SettingsMsg::WizardProfileContinue);
 
     assert_eq!(app.settings.harvest_web_address.as_deref(), Some("https://acme.harvestapp.com"));
+}
+
+#[test]
+fn budget_summary_team_scope_counts_members() {
+    use crate::state::project_budgets::{BudgetScope, ProjectBudget};
+
+    let mut other = make_entry(2, 10, 1, 3.0, false);
+    other.user = UserRef { id: 2, name: Some("Bob".into()) };
+    let entries = vec![make_entry(1, 10, 1, 5.0, false), other];
+    let mut budget = ProjectBudget {
+        id: 1,
+        name: "Edu".into(),
+        budget_hours: 100.0,
+        project_ids: vec![10],
+        task_ids: vec![],
+        scope: BudgetScope::MeAndTeam,
+    };
+    let team = compute_budget_summaries(&[budget.clone()], &entries, Some(1));
+    assert!((team[0].used_hours - 8.0).abs() < 1e-9);
+    assert_eq!(team[0].split.segments.len(), 2);
+
+    budget.scope = BudgetScope::Me;
+    let me = compute_budget_summaries(&[budget], &entries, Some(1));
+    assert!((me[0].used_hours - 5.0).abs() < 1e-9);
+    assert_eq!(me[0].split.segments.len(), 1);
 }

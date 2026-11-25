@@ -3,6 +3,14 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// Whose hours a manual budget counts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BudgetScope {
+    #[default]
+    Me,
+    MeAndTeam,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectBudget {
     pub id: u64,
@@ -11,6 +19,8 @@ pub struct ProjectBudget {
     pub project_ids: Vec<i64>,
     #[serde(default)]
     pub task_ids: Vec<i64>,
+    #[serde(default)]
+    pub scope: BudgetScope,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +65,7 @@ impl ProjectBudgetStore {
                     budget_hours: b.budget_hours,
                     project_ids: b.project_ids,
                     task_ids: b.task_ids,
+                    scope: BudgetScope::default(),
                 })
                 .collect();
             let mut years = HashMap::new();
@@ -109,6 +120,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_budget_without_scope_loads_as_me() {
+        let json = r#"{"next_id":2,"years":{"2026":[{"id":1,"name":"A","budget_hours":10.0,"project_ids":[1]}]}}"#;
+        let store: ProjectBudgetStore = serde_json::from_str(json).unwrap();
+        assert_eq!(store.budgets_for(2026)[0].scope, BudgetScope::Me);
+    }
+
+    #[test]
     fn default_is_empty() {
         let store = ProjectBudgetStore::default();
         assert_eq!(store.next_id, 1);
@@ -127,6 +145,7 @@ mod tests {
             budget_hours: 100.0,
             project_ids: vec![42],
             task_ids: vec![],
+            scope: BudgetScope::Me,
         });
         assert_eq!(store.budgets_for(2026).len(), 1);
         assert!(store.budgets_for(2025).is_empty());
@@ -142,6 +161,7 @@ mod tests {
             budget_hours: 50.0,
             project_ids: vec![10],
             task_ids: vec![20, 30],
+            scope: BudgetScope::Me,
         });
         store.budgets_for_mut(2026).push(ProjectBudget {
             id: 2,
@@ -149,6 +169,7 @@ mod tests {
             budget_hours: 200.0,
             project_ids: vec![11, 12],
             task_ids: vec![],
+            scope: BudgetScope::Me,
         });
         store.next_id = 3;
         store.save(dir.path()).unwrap();

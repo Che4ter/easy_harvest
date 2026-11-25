@@ -1,14 +1,15 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length};
+use crate::state::project_budgets::BudgetScope;
 
 use crate::app::{
-    EasyHarvest, Message, ProjectTrackingMsg, ACCENT, DANGER, FONT_REGULAR,
+    EasyHarvest, Message, ProjectTrackingMsg, ACCENT, DANGER, FONT_MEDIUM, FONT_REGULAR,
     FONT_SEMIBOLD, SUCCESS, TEXT_MUTED, TEXT_PRIMARY,
 };
 use super::{
     caption, card_style, delete_chip_btn, dropdown_container_style, field_label, format_hhmm,
     input_style, nav_arrow_btn, outline_btn_sm, primary_btn, progress_bar, refresh_btn,
-    section_heading, suggestion_btn_style, LIST_ROW_SPACING, PAGE_PADDING, SECTION_GAP,
+    section_heading, suggestion_btn_style, toggle_active_style, toggle_inactive_style, LIST_ROW_SPACING, PAGE_PADDING, SECTION_GAP,
 };
 
 pub fn view(state: &EasyHarvest) -> Element<'_, Message> {
@@ -294,6 +295,29 @@ fn budget_form<'a>(state: &'a EasyHarvest, form: &'a crate::app::BudgetForm) -> 
         Space::new().into()
     };
 
+    let scope_toggle: Element<Message> = if state.settings.team_lead_mode
+        && !state.team_settings.members.is_empty()
+    {
+        let btn = |label: &'static str, scope: BudgetScope| {
+            let active = form.scope == scope;
+            button(text(label).font(FONT_MEDIUM).size(12).align_x(Alignment::Center))
+                .style(move |_, _: iced::widget::button::Status| {
+                    if active { toggle_active_style(5.0) } else { toggle_inactive_style(5.0) }
+                })
+                .padding([4, 6])
+                .width(Length::FillPortion(1))
+                .on_press(Message::ProjectTracking(ProjectTrackingMsg::ScopeChanged(scope)))
+        };
+        column![
+            field_label("Count hours of"),
+            row![btn("Me", BudgetScope::Me), btn("Me + team", BudgetScope::MeAndTeam)].spacing(4),
+        ]
+        .spacing(8)
+        .into()
+    } else {
+        Space::new().into()
+    };
+
     container(
         column![
             section_heading(title),
@@ -309,6 +333,7 @@ fn budget_form<'a>(state: &'a EasyHarvest, form: &'a crate::app::BudgetForm) -> 
                 .style(input_style)
                 .size(13)
                 .padding([8, 10]),
+            scope_toggle,
             field_label("Projects"),
             text_input("Search projects…", &form.project_query)
                 .on_input(|v| Message::ProjectTracking(ProjectTrackingMsg::ProjectQueryChanged(v)))

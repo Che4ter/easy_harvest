@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::project_budgets::BudgetScope;
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
@@ -669,12 +670,31 @@ impl EasyHarvest {
             .collect();
 
         let user_id = self.harvest_user_id;
+        let member_ids: Vec<i64> = if self.team_scope_active()
+            && self
+                .project_tracking
+                .budgets
+                .budgets_for(year)
+                .iter()
+                .any(|b| b.scope == BudgetScope::MeAndTeam)
+        {
+            self.team_settings.members.iter().map(|m| m.harvest_user_id).collect()
+        } else {
+            Vec::new()
+        };
         Task::perform(
             async move {
-                let all_entries = client
+                let mut all_entries = client
                     .list_all_time_entries(user_id, &from, &to)
                     .await
                     .map_err(|e| e.to_string())?;
+                for member_id in member_ids {
+                    let theirs = client
+                        .list_all_time_entries(Some(member_id), &from, &to)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    all_entries.extend(theirs);
+                }
                 let filtered: Vec<_> = all_entries
                     .into_iter()
                     .filter(|e| all_project_ids.contains(&e.project.id))
@@ -688,10 +708,21 @@ impl EasyHarvest {
     pub(super) fn recompute_project_tracking_summaries(&mut self) {
         let year = self.project_tracking.year;
         let entries = &self.project_tracking.entries;
-        self.project_tracking.summaries = compute_budget_summaries(
-            self.project_tracking.budgets.budgets_for(year),
-            entries,
-        );
+        // Me + team falls back to Me when team mode is off or there are no
+        // members; the stored scope is left untouched.
+        let mut budgets = self.project_tracking.budgets.budgets_for(year).to_vec();
+        if !self.team_scope_active() {
+            for b in &mut budgets {
+                b.scope = BudgetScope::Me;
+            }
+        }
+        self.project_tracking.summaries =
+            compute_budget_summaries(&budgets, entries, self.harvest_user_id);
+    }
+
+    /// Whether "Me + team" can take effect: team lead mode on and members exist.
+    pub(super) fn team_scope_active(&self) -> bool {
+        self.settings.team_lead_mode && !self.team_settings.members.is_empty()
     }
 }
 
@@ -700,16 +731,34 @@ impl EasyHarvest {
 pub(super) fn compute_budget_summaries(
     budgets: &[crate::state::project_budgets::ProjectBudget],
     entries: &[crate::harvest::models::TimeEntry],
+    current_user_id: Option<i64>,
 ) -> Vec<super::project_tracking::BudgetSummary> {
     budgets
         .iter()
         .map(|budget| {
-            let used_hours: f64 = entries
+            let counted: Vec<crate::harvest::models::TimeEntry> = entries
                 .iter()
                 .filter(|e| budget.project_ids.contains(&e.project.id))
+                .filter(|e| match (budget.scope, current_user_id) {
+                    (BudgetScope::Me, Some(uid)) => e.user.id == uid,
+                    _ => true,
+                })
+                .cloned()
+                .collect();
+            let used_hours: f64 = counted
+                .iter()
                 .filter(|e| budget.task_ids.is_empty() || budget.task_ids.contains(&e.task.id))
                 .map(|e| e.hours)
                 .sum();
+            let task_filter: Option<std::collections::HashSet<i64>> = (!budget.task_ids.is_empty())
+                .then(|| budget.task_ids.iter().copied().collect());
+            let split = super::budget_split::compute_person_split(
+                &counted,
+                task_filter.as_ref(),
+                None,
+                current_user_id,
+                4,
+            );
             let remaining_hours = budget.budget_hours - used_hours;
             let pct_used = if budget.budget_hours > 0.0 {
                 used_hours / budget.budget_hours
@@ -721,6 +770,7 @@ pub(super) fn compute_budget_summaries(
                 used_hours,
                 remaining_hours,
                 pct_used,
+                split,
             }
         })
         .collect()

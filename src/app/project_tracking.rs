@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::project_budgets::{ProjectBudget, ProjectBudgetStore};
+use crate::state::project_budgets::{BudgetScope, ProjectBudget, ProjectBudgetStore};
 
 // ── Page state ──────────────────────────────────────────────────────────────
 
@@ -9,6 +9,7 @@ pub struct BudgetSummary {
     pub used_hours: f64,
     pub remaining_hours: f64,
     pub pct_used: f64,
+    pub split: super::PersonSplit,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -19,6 +20,7 @@ pub struct BudgetForm {
     /// Selected (project_id, project_name, client_name) tuples.
     pub selected_projects: Vec<(i64, String, String)>,
     pub editing_id: Option<u64>,
+    pub scope: BudgetScope,
     pub error: Option<String>,
 }
 
@@ -26,6 +28,7 @@ pub struct ValidatedBudget {
     pub name: String,
     pub budget_hours: f64,
     pub project_ids: Vec<i64>,
+    pub scope: BudgetScope,
     pub editing_id: Option<u64>,
 }
 
@@ -45,7 +48,7 @@ impl BudgetForm {
             return Err("Select at least one project.".into());
         }
         let project_ids = self.selected_projects.iter().map(|(id, _, _)| *id).collect();
-        Ok(ValidatedBudget { name, budget_hours, project_ids, editing_id: self.editing_id })
+        Ok(ValidatedBudget { name, budget_hours, project_ids, scope: self.scope, editing_id: self.editing_id })
     }
 }
 
@@ -86,6 +89,7 @@ pub enum ProjectTrackingMsg {
     ProjectQueryChanged(String),
     ProjectSelected(usize),
     ProjectRemoved(i64),
+    ScopeChanged(BudgetScope),
     FormSubmit,
 }
 
@@ -181,6 +185,7 @@ impl EasyHarvest {
                         project_query: String::new(),
                         selected_projects,
                         editing_id: Some(id),
+                        scope: budget.scope,
                         error: None,
                     });
                 }
@@ -243,6 +248,11 @@ impl EasyHarvest {
                 Task::none()
             }
 
+            ProjectTrackingMsg::ScopeChanged(scope) => {
+                if let Some(f) = &mut self.project_tracking.form { f.scope = scope; }
+                Task::none()
+            }
+
             ProjectTrackingMsg::FormSubmit => {
                 let Some(form) = &self.project_tracking.form else { return Task::none(); };
 
@@ -262,6 +272,7 @@ impl EasyHarvest {
                         budget.name = validated.name;
                         budget.budget_hours = validated.budget_hours;
                         budget.project_ids = validated.project_ids;
+                        budget.scope = validated.scope;
                     }
                 } else {
                     let id = self.project_tracking.budgets.next_id;
@@ -272,6 +283,7 @@ impl EasyHarvest {
                         budget_hours: validated.budget_hours,
                         project_ids: validated.project_ids,
                         task_ids: Vec::new(),
+                        scope: validated.scope,
                     });
                 }
 
