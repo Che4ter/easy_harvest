@@ -32,6 +32,7 @@ mod subscription;
 mod team;
 mod view;
 mod project_tracking;
+mod budget_split;
 mod unsubmitted_warning;
 
 pub use billable::BillableMsg;
@@ -51,6 +52,7 @@ pub use settings::SettingsMsg;
 pub use settings::{SettingsFormState, ValidatedProfile, ValidatedCarryover, TemplateFormState};
 pub use project_tracking::ProjectTrackingMsg;
 pub use project_tracking::{ProjectTrackingPageState, BudgetSummary, BudgetForm};
+pub use budget_split::{ManagedBudget, PersonSplit, Segment};
 pub use team::{TeamMsg, TeamMemberForm, TeamMemberStats, TeamPageState};
 
 #[cfg(test)]
